@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!--Editor:yilin-->
+<!--Company:CLIOT-->
+<!--Email:yilin@cloit.net-->
+<html> 
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0" />
+<meta name="keywords" content="Public IoT 物联网 消息推送 开放平台 智能硬件 公共物联网 公共服务" />
+<meta name="renderer" content="webkit"/>
+<script type="text/javascript" src="http://www.cliot.net/index/pc/jquery.js"></script>
+<title>ILog 日志WebSocket测试</title>
+<style type="text/css">
+*{  
+	margin:0px;
+	padding:0px;
+	border:none;
+	outline:none;
+	list-style-type:none;
+	text-decoration:none;
+	font-size:16px;
+	font-family: -apple-system,BlinkMacSystemFont,"SF Pro SC","SF Pro Text","Helvetica Neue",Helvetica,"PingFang SC","Segoe UI",Roboto,"Hiragino Sans GB",'arial','microsoft yahei ui',"Microsoft YaHei",SimSun,sans-serif;
+	-webkit-tap-highlight-color:transparent;
+}
+body{
+	min-width:1080px;
+	background-color:white;
+	height:auto;
+	color:white;
+}
+.header{
+	height:60px;
+	line-height:60px;
+}
+.header_content{
+	width:1010px;
+	margin:0 auto;
+}
+.bodyer{
+	width:1010px;
+	margin:0 auto;
+}
+.bodyer_title{
+	height:60px;
+	line-height:60px;
+	width:1010px;
+	margin:0 auto;
+	text-align:center;
+	font-size:24px;
+	color:black;
+}
+.bodyer_content{
+	margin-top:60px;
+	width:1010px;
+	height:400px;
+	position: fixed;
+    background-color: black;
+    overflow-y: auto;
+    font-size: white;
+}
+</style>
+<body>
+<div class="header">
+<div class="header_content">
+<a class="header_icon"><span>Ilog Web Console</span></a>
+</div>
+</div>
+<div class="bodyer">
+<div class="bodyer_title">
+<p id="status">连接服务中...</p>
+</div>
+<div id="content" class="bodyer_content">
+</div>
+</div>
+</div>
+<div class="footer">
+</div>
+</body>
+<script>
+var websocket = null;
+var disconnectcode = 0;
+var content = document.getElementById("content");
+$(document).ready(function(){
+	websocket = new WebSocket("ws://127.0.0.1:8089");
+	websocket.onopen = function(evt){
+		$("#status").html("已连接上日志服务器");
+	}
+	websocket.onerror = function(evt){
+		$("#status").html("websocket错误");
+	}
+	websocket.onmessage = function(evt){
+		content.innerHTML += evt.data+'</br>';
+		content.scrollTop=content.scrollHeight;
+	}
+	websocket.onclose = function(evt){
+		if(0 == disconnectcode){
+			$("#status").html("与服务器断开了");
+		}
+	}
+});
+</script>
+</html>
