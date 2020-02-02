@@ -29,7 +29,7 @@ type Cache interface{
 	Start()(err error)//初始化启动缓存服务
 	Stop()(err error)//停用缓存服务
 	Get(key string)(value []byte,err error)//获取Key的值
-	Set(key string,value []byte,expire int)(err error)//设置Key的值
+	Set(key string,value []byte,expire uint32)(err error)//设置Key的值
 	Delete(key string)(sta bool,err error)//删除指定Key的值
 	Exists(key string)(sta bool,err error)//查看Key是否存在
 }

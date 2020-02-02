@@ -5,44 +5,27 @@ package cache
 // in the LICENSE file.
 
 import(
-	"fmt"
 	"net"
 	"sync"
 	"bytes"
 	"errors"
+	"strconv"
 	"github.com/chelion/gws/utils"
 )
 
 var (
 	versionCmd		= []byte("version \r\n")
-	crlf            = []byte("\r\n")
-	space           = []byte(" ")
-	resultOK        = []byte("OK\r\n")
-	resultStored    = []byte("STORED\r\n")
-	resultNotStored = []byte("NOT_STORED\r\n")
-	resultExists    = []byte("EXISTS\r\n")
-	resultNotFound  = []byte("NOT_FOUND\r\n")
-	resultDeleted   = []byte("DELETED\r\n")
-	resultEnd       = []byte("END\r\n")
-	resultOk        = []byte("OK\r\n")
-	resultTouched   = []byte("TOUCHED\r\n")
-
-	ErrCacheMiss = errors.New("memcache: cache miss")
-
-	ErrCASConflict = errors.New("memcache: compare-and-swap conflict")
-
-	ErrNotStored = errors.New("memcache: item not stored")
-
-	ErrServerError = errors.New("memcache: server error")
-
-	ErrMalformedKey = errors.New("malformed: key is too long or contains invalid characters")
+	ErrMemCacheMiss = errors.New("memcache: cache miss")
+	ErrMemNotStored = errors.New("memcache: item not stored")
+	ErrMemCorrupt = errors.New("memcache: corrupt get result read")
+	ErrMemUnexpectedError = errors.New("memcache: unexpected line in get response")
 )
 
-type Item struct {
+type MemItem struct {
 	Key string
 	Value []byte
 	Flags uint32
-	Expiration int32
+	Expiration uint32
 	casid uint64
 }
 
@@ -58,7 +41,7 @@ type MemCache struct{
 
 type MemCacheClient struct{
 	conn net.Conn
-	readBuff []byte
+	cacheBuff []byte
 	bytesBuff *bytes.Buffer
 	isAlive bool
 	timeout int64
@@ -73,7 +56,6 @@ func (mcc *MemCacheClient)Close()(err error){
 	err = nil
 	if nil != mcc.conn{
 		err = mcc.conn.Close()
-		fmt.Println("close")
 		if nil == err{
 			mcc.conn = nil
 		}
@@ -87,12 +69,11 @@ func (mcc *MemCacheClient)IsAlive()(sta bool){
 		if nil != err{
 			mcc.isAlive = false
 		}
-		mcc.readBuff=mcc.readBuff[0:]
-		_, err = mcc.conn.Read(mcc.readBuff)
+		mcc.cacheBuff=mcc.cacheBuff[0:]
+		_, err = mcc.conn.Read(mcc.cacheBuff)
 		if nil != err{
 			mcc.isAlive = false
-		}
-		if nil == err{
+		}else{
 			mcc.lastActiveTime = utils.GetNowUnixSec()
 			mcc.isAlive = true
 			return true
@@ -108,11 +89,9 @@ func NewMemCache(config *CacheConfig)(memc *MemCache,err error){
 }
 
 func (memc *MemCache)Start()(err error){
-	fmt.Println("start---------------------------")
 	memc.lock.Lock()
 	defer memc.lock.Unlock()
 	if true == memc.isStopped{
-		fmt.Println("start clientPool")
 		clientPool,err := utils.NewConnectPool(memc.config.ConnectMinNum,memc.config.ConnectMaxNum,func ()(item utils.ConnectPoolItem,err error){
 			mcc := &MemCacheClient{conn:nil}
 			mcc.conn, err = net.Dial(memc.netWork,memc.serverAddr)
@@ -121,7 +100,7 @@ func (memc *MemCache)Start()(err error){
 			}
 			mcc.isAlive = true
 			mcc.timeout = memc.timeoutSec
-			mcc.readBuff = make([]byte,512)
+			mcc.cacheBuff = make([]byte,512)
 			mcc.bytesBuff = new(bytes.Buffer)
 			mcc.lastActiveTime = utils.GetNowUnixSec()
 			return utils.ConnectPoolItem(mcc),nil
@@ -133,9 +112,7 @@ func (memc *MemCache)Start()(err error){
 		memc.clientPool = clientPool
 		if nil == memc.clientPool.Start(memc.timeoutSec){
 			memc.isStopped = false
-			fmt.Println("memc.isActive")
 		}
-		fmt.Println("start------------end---------------",err)
 		return err
 	}
 	return nil
@@ -154,7 +131,7 @@ func (memc *MemCache)Stop()(err error){
 	return nil
 }
 
-func checkKey(key string) bool {
+func memCheckKey(key string) bool {
 	if 0 == len(key) || len(key) > 250 {
 		return false
 	}
@@ -166,53 +143,51 @@ func checkKey(key string) bool {
 	return true
 }
 
-func scanGetResponseLine(line []byte, it *Item) (size int, err error) {
-	pattern := "VALUE %s %d %d %d\r\n"
-	dest := []interface{}{&it.Key, &it.Flags, &size, &it.casid}
-	if bytes.Count(line, space) == 3 {
-		pattern = "VALUE %s %d %d\r\n"
-		dest = dest[:3]
+func memScanGetResponseLine(line []byte, it *MemItem) (size int64, err error) {
+	if len(line) < 2{
+		return -1,ErrMemUnexpectedError
 	}
-	n, err := fmt.Sscanf(string(line), pattern, dest...)
-	if err != nil || n != len(dest) {
-		return -1, fmt.Errorf("memcache: unexpected line in get response: %q", line)
+	params := bytes.Split(line[:len(line)-2],[]byte(" "))
+	if len(params) >= 3{
+		it.Key = utils.Bytes2String(params[0])
+		if 3 == len(params){
+			return strconv.ParseInt(utils.Bytes2String(params[2]), 10, 0)
+		}
+		return strconv.ParseInt(utils.Bytes2String(params[3]), 10, 0)
 	}
-	return size, nil
+	return -1,ErrMemUnexpectedError
 }
 
-func getCmd(mcc *MemCacheClient,key string)(item *Item,err error){
+func memGetCmd(mcc *MemCacheClient,key string)(item *MemItem,err error){
 	_,err = mcc.conn.Write(utils.String2Bytes("get "+key+"\r\n"))
 	if nil != err{
-		fmt.Println(err)
 		return nil,CACHECLIENT_ERR
 	}
-	mcc.readBuff=mcc.readBuff[0:]
-	ilen, err := mcc.conn.Read(mcc.readBuff)
+	mcc.cacheBuff=mcc.cacheBuff[0:]
+	ilen, err := mcc.conn.Read(mcc.cacheBuff)
 	if nil != err{
-		fmt.Println(err)
 		return nil,CACHECLIENT_ERR
 	}
 	mcc.bytesBuff.Reset()
-	mcc.bytesBuff.Write(mcc.readBuff[0:ilen])
+	mcc.bytesBuff.Write(mcc.cacheBuff[0:ilen])
 	useLen := 0
 	for {
 		line, err := mcc.bytesBuff.ReadBytes('\n')
 		useLen += len(line)
 		if err != nil {
-			fmt.Println(err)
 			return nil,err
 		}
-		if bytes.Equal(line, resultNotFound) {
-			return nil,ErrCacheMiss
+		if line[0] == 'N' {
+			return nil,ErrMemCacheMiss
 		}
-		if bytes.Equal(line, resultEnd) {
+		if line[0] == 'E'{
 			if ilen == useLen{
-				return nil,ErrCacheMiss
+				return nil,ErrMemCacheMiss
 			}
 			continue
 		}
-		item = new(Item)
-		size, err := scanGetResponseLine(line, item)
+		item = new(MemItem)
+		size, err := memScanGetResponseLine(line, item)
 		if err != nil {
 			return nil,err
 		}
@@ -220,45 +195,51 @@ func getCmd(mcc *MemCacheClient,key string)(item *Item,err error){
 		valueReadLen := len(mcc.bytesBuff.Bytes())
 		copy(item.Value,mcc.bytesBuff.Bytes())
 		readLen := 0
-		if size+2 > valueReadLen{
+		if size+2 > int64(valueReadLen){
 			for{
 				readLen, err = mcc.conn.Read(item.Value[valueReadLen:])
 				if nil != err{
 					return nil,CACHECLIENT_ERR
 				}
 				valueReadLen += readLen
-				if valueReadLen == size+2{
+				if int64(valueReadLen) == size+2{
 					break
 				}
 			}
 		}
-		if !bytes.HasSuffix(item.Value, crlf) {
+		if !bytes.HasSuffix(item.Value, []byte("\r\n")) {
 			item.Value = nil
-			return nil,errors.New("memcache: corrupt get result read")
+			return nil,ErrMemCorrupt
 		}
 		item.Value = item.Value[:size]
 		return item,nil
 	}
 }
 
-func setCmd(mcc *MemCacheClient,item *Item)(err error){
+func memSetCmd(mcc *MemCacheClient,item *MemItem)(err error){
 	mcc.bytesBuff.Reset()
-	mcc.bytesBuff.Write([]byte(fmt.Sprintf("set %s %d %d %d\r\n",
-		item.Key, item.Flags, item.Expiration, len(item.Value))))
-	
+	mcc.bytesBuff.Write([]byte("set "))
+	mcc.bytesBuff.Write([]byte(item.Key))
+	mcc.bytesBuff.Write([]byte(" "))
+	mcc.bytesBuff.Write([]byte(strconv.Itoa(int(item.Flags))))
+	mcc.bytesBuff.Write([]byte(" "))
+	mcc.bytesBuff.Write([]byte(strconv.Itoa(int(item.Expiration))))
+	mcc.bytesBuff.Write([]byte(" "))
+	mcc.bytesBuff.Write([]byte(strconv.Itoa(len(item.Value))))
+	mcc.bytesBuff.Write([]byte("\r\n"))
 	mcc.bytesBuff.Write(item.Value)
-	mcc.bytesBuff.Write(crlf)
+	mcc.bytesBuff.Write([]byte("\r\n"))
 	_,err = mcc.conn.Write(mcc.bytesBuff.Bytes())
 	if nil != err{
 		return CACHECLIENT_ERR
 	}
-	mcc.readBuff=mcc.readBuff[0:]
-	ilen, err := mcc.conn.Read(mcc.readBuff)
+	mcc.cacheBuff=mcc.cacheBuff[0:]
+	ilen, err := mcc.conn.Read(mcc.cacheBuff)
 	if nil != err{
 		return CACHECLIENT_ERR
 	}
 	mcc.bytesBuff.Reset()
-	mcc.bytesBuff.Write(mcc.readBuff[0:ilen])
+	mcc.bytesBuff.Write(mcc.cacheBuff[0:ilen])
 	useLen := 0
 	for {
 		line, err := mcc.bytesBuff.ReadBytes('\n')
@@ -266,39 +247,32 @@ func setCmd(mcc *MemCacheClient,item *Item)(err error){
 		if err != nil {
 			return err
 		}
-		if bytes.Equal(line, resultEnd) {
+		if line[0] == 'S'{
+			return nil
+		}
+		if line[0] == 'E'{
 			if ilen == useLen{
-				return ErrCacheMiss
+				return ErrMemNotStored
 			}
 			continue
 		}
-		switch {
-			case bytes.Equal(line, resultStored):
-				return nil
-			case bytes.Equal(line, resultNotStored):
-				return ErrNotStored
-			case bytes.Equal(line, resultExists):
-				return ErrCASConflict
-			case bytes.Equal(line, resultNotFound):
-				return ErrCacheMiss
-		}
-		return fmt.Errorf("memcache: unexpected response line from set: %q",string(line))
+		return ErrMemUnexpectedError
 	}
 }
 
 
-func deleteCmd(mcc *MemCacheClient,key string) error {
+func memDeleteCmd(mcc *MemCacheClient,key string) error {
 	_, err := mcc.conn.Write(utils.String2Bytes("delete "+key+"\r\n"))
 	if err != nil {
 		return CACHECLIENT_ERR
 	}
-	mcc.readBuff=mcc.readBuff[0:]
-	ilen, err := mcc.conn.Read(mcc.readBuff)
+	mcc.cacheBuff=mcc.cacheBuff[0:]
+	ilen, err := mcc.conn.Read(mcc.cacheBuff)
 	if nil != err{
 		return CACHECLIENT_ERR
 	}
 	mcc.bytesBuff.Reset()
-	mcc.bytesBuff.Write(mcc.readBuff[0:ilen])
+	mcc.bytesBuff.Write(mcc.cacheBuff[0:ilen])
 	useLen := 0
 	for{
 		line, err := mcc.bytesBuff.ReadBytes('\n')
@@ -306,30 +280,24 @@ func deleteCmd(mcc *MemCacheClient,key string) error {
 		if err != nil {
 			return err
 		}
-		if bytes.Equal(line, resultEnd) {
+		if line[0] == 'D'{
+			return nil
+		}
+		if line[0] == 'N'{
+			return ErrMemCacheMiss
+		}
+		if line[0] == 'E'{
 			if ilen == useLen{
-				return ErrCacheMiss
+				return ErrMemCacheMiss
 			}
 			continue
 		}
-		switch {
-			case bytes.Equal(line, resultOK):
-				return nil
-			case bytes.Equal(line, resultDeleted):
-				return nil
-			case bytes.Equal(line, resultNotStored):
-				return ErrNotStored
-			case bytes.Equal(line, resultExists):
-				return ErrCASConflict
-			case bytes.Equal(line, resultNotFound):
-				return ErrCacheMiss
-		}
-		return fmt.Errorf("memcache: unexpected response line: %q", string(line))
+		return ErrMemUnexpectedError
 	}
 }
 
 func (memc *MemCache)Get(key string)(value []byte,err error){
-	if false == checkKey(key){
+	if false == memCheckKey(key){
 		return nil,CACHEPARAM_ERR
 	}
 	memc.lock.RLock()
@@ -340,7 +308,7 @@ func (memc *MemCache)Get(key string)(value []byte,err error){
 			mcc,ok := item.(*MemCacheClient)
 			if ok{
 				defer memc.clientPool.Put(item)
-				getItem,err := getCmd(mcc,key)
+				getItem,err := memGetCmd(mcc,key)
 				if nil == err{
 					mcc.lastActiveTime = utils.GetNowUnixSec()
 					if nil != getItem{
@@ -367,8 +335,8 @@ func (memc *MemCache)Get(key string)(value []byte,err error){
 	return nil,CACHECLIENT_NIL
 }
 
-func (memc *MemCache)Set(key string,value []byte,expire int)(err error){
-	if nil == value || false == checkKey(key){
+func (memc *MemCache)Set(key string,value []byte,expire uint32)(err error){
+	if nil == value || false == memCheckKey(key){
 		return CACHEPARAM_ERR
 	}
 	memc.lock.RLock()
@@ -379,8 +347,8 @@ func (memc *MemCache)Set(key string,value []byte,expire int)(err error){
 			mcc,ok := item.(*MemCacheClient)
 			if ok{
 				defer memc.clientPool.Put(item)
-				newItem := &Item{Key:key,Value:value,Expiration:int32(expire)}
-				err = setCmd(mcc,newItem)
+				newItem := &MemItem{Key:key,Value:value,Expiration:expire}
+				err = memSetCmd(mcc,newItem)
 				if err == CACHECLIENT_ERR{
 					mcc.isAlive = false
 				}else{
@@ -402,7 +370,7 @@ func (memc *MemCache)Set(key string,value []byte,expire int)(err error){
 }
 
 func (memc *MemCache)Delete(key string)(sta bool,err error){
-	if false == checkKey(key){
+	if false == memCheckKey(key){
 		return false,CACHEPARAM_ERR
 	}
 	memc.lock.RLock()
@@ -413,7 +381,7 @@ func (memc *MemCache)Delete(key string)(sta bool,err error){
 			mcc,ok := item.(*MemCacheClient)
 			if ok{
 				defer memc.clientPool.Put(item)
-				err = deleteCmd(mcc,key)
+				err = memDeleteCmd(mcc,key)
 				if nil == err{
 					return true,nil
 				}
@@ -437,11 +405,9 @@ func (memc *MemCache)Delete(key string)(sta bool,err error){
 }
 
 func (memc *MemCache)Exists(key string)(sta bool,err error){
-	/*
-	if false == checkKey(key){
-		return false,CACHEPARAM_ERR
+	item,err := memc.Get(key)
+	if nil != item{
+		return true,nil
 	}
-
-	return false,CACHECLIENT_NIL*/
-	return true,nil
+	return false,err
 }

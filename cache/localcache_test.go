@@ -1,5 +1,5 @@
 package cache
-
+/*
 import(
 	"fmt"
 	"bytes"
@@ -87,3 +87,4 @@ func TestLocalCache(t *testing.T){
 	}
 	fmt.Println("--------end test memcache cache--------")
 }
+*/

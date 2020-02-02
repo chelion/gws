@@ -47,7 +47,7 @@ func (lcc *LocalCache)Get(key string)(value []byte,err error){
 	return nil,CACHECLIENT_NIL
 }
 
-func (lcc *LocalCache)Set(key string,value []byte,expire int)(err error){
+func (lcc *LocalCache)Set(key string,value []byte,expire uint32)(err error){
 	if len(value) > CACHEITEMMAXSIZE{
 		return CACHEMAXSIZE_OVER
 	}

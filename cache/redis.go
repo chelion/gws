@@ -4,14 +4,21 @@ package cache
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 
-/*
+
 import(
-	//"fmt"
+	"fmt"
 	"net"
 	"sync"
 	"bytes"
-	//"errors"
+	"errors"
+	"strconv"
 	"github.com/chelion/gws/utils"
+)
+
+var (
+	ErrRedisCacheMiss = errors.New("rediscache: cache miss")
+	ErrRedisNotStored = errors.New("rediscache: item not stored")
+	ErrRedisCorrupt = errors.New("rediscache: corrupt get result read")
 )
 
 type RedisCache struct{
@@ -26,13 +33,18 @@ type RedisCache struct{
 
 type RedisCacheClient struct{
 	conn net.Conn
-	readBuff []byte
+	cacheBuff []byte
 	bytesBuff *bytes.Buffer
 	isAlive bool
 	timeout int64
 	lastActiveTime int64
 }
 
+type RedisItem struct {
+	Key string
+	Value []byte
+	Expiration uint32
+}
 
 func (rcc *RedisCacheClient)Open()(err error){
 	return nil
@@ -40,39 +52,41 @@ func (rcc *RedisCacheClient)Open()(err error){
 
 func (rcc *RedisCacheClient)Close()(err error){
 	err = nil
-	if nil != mcc.conn{
-		err = mcc.conn.Close()
+	if nil != rcc.conn{
+		err = rcc.conn.Close()
 		fmt.Println("close")
 		if nil == err{
-			mcc.conn = nil
+			rcc.conn = nil
 		}
 	}
 	return 
 }
 
 func (rcc *RedisCacheClient)IsAlive()(sta bool){
-	if utils.GetNowUnixSec() - mcc.lastActiveTime > mcc.timeout {
-		_,err := mcc.conn.Write(versionCmd)
+	if utils.GetNowUnixSec() - rcc.lastActiveTime > rcc.timeout {
+		_,err := rcc.conn.Write([]byte("*1\r\n$4\r\nPING\r\n"))
 		if nil != err{
-			mcc.isAlive = false
+			rcc.isAlive = false
 		}
-		mcc.readBuff=mcc.readBuff[0:]
-		_, err = mcc.conn.Read(mcc.readBuff)
+		rcc.cacheBuff=rcc.cacheBuff[0:]
+		ilen, err := rcc.conn.Read(rcc.cacheBuff)
 		if nil != err{
-			mcc.isAlive = false
-		}
-		if nil == err{
-			mcc.lastActiveTime = utils.GetNowUnixSec()
-			mcc.isAlive = true
-			return true
+			rcc.isAlive = false
+		}else{
+			if 0 == bytes.Compare(rcc.cacheBuff[:ilen],[]byte("+PONG\r\n")){
+				fmt.Println("good ping")
+				rcc.lastActiveTime = utils.GetNowUnixSec()
+				rcc.isAlive = true
+				return true
+			}
 		}
 	}
-	return mcc.isAlive
+	return rcc.isAlive
 }
 
 
 func NewRedisCache(config *CacheConfig)(redisc *RedisCache,err error){
-	redisc = &MemCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,lock:new(sync.RWMutex),timeoutSec:config.TimeoutSec}
+	redisc = &RedisCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,lock:new(sync.RWMutex),timeoutSec:config.TimeoutSec}
 	return redisc,nil
 }
 
@@ -83,17 +97,17 @@ func (redisc *RedisCache)Start()(err error){
 	if true == redisc.isStopped{
 		fmt.Println("start clientPool")
 		clientPool,err := utils.NewConnectPool(redisc.config.ConnectMinNum,redisc.config.ConnectMaxNum,func ()(item utils.ConnectPoolItem,err error){
-			mcc := &MemCacheClient{conn:nil}
-			mcc.conn, err = net.Dial(redisc.netWork,redisc.serverAddr)
+			rcc := &RedisCacheClient{conn:nil}
+			rcc.conn, err = net.Dial(redisc.netWork,redisc.serverAddr)
 			if nil != err{
 				return nil,CACHESERVER_ERR
 			}
-			mcc.isAlive = true
-			mcc.timeout = redisc.timeoutSec
-			mcc.readBuff = make([]byte,512)
-			mcc.bytesBuff = new(bytes.Buffer)
-			mcc.lastActiveTime = utils.GetNowUnixSec()
-			return utils.ConnectPoolItem(mcc),nil
+			rcc.isAlive = true
+			rcc.timeout = redisc.timeoutSec
+			rcc.cacheBuff = make([]byte,512)
+			rcc.bytesBuff = new(bytes.Buffer)
+			rcc.lastActiveTime = utils.GetNowUnixSec()
+			return utils.ConnectPoolItem(rcc),nil
 		})
 		if nil != err{
 			
@@ -123,8 +137,153 @@ func (redisc *RedisCache)Stop()(err error){
 	return nil
 }
 
+func bitsUint32(a uint32)int{
+    i := 0
+    for a >0 {
+        a /= 10
+        i++
+	}
+	return i
+}
+
+func redisGetCmd(rcc *RedisCacheClient,key string)(item *RedisItem,err error){
+	rcc.bytesBuff.Reset()
+	rcc.bytesBuff.Write([]byte("*2\r\n$3\r\nGET\r\n$"))
+	rcc.bytesBuff.Write(utils.String2Bytes(strconv.Itoa(len(key))))
+	rcc.bytesBuff.Write([]byte("\r\n"))
+	rcc.bytesBuff.Write(utils.String2Bytes(key))
+	rcc.bytesBuff.Write([]byte("\r\n"))
+	_,err = rcc.conn.Write(rcc.bytesBuff.Bytes())
+	if nil != err{
+		return nil,CACHECLIENT_ERR
+	}
+	rcc.cacheBuff=rcc.cacheBuff[0:]
+	ilen, err := rcc.conn.Read(rcc.cacheBuff)
+	if nil != err{
+		return nil,CACHECLIENT_ERR
+	}
+	rcc.bytesBuff.Reset()
+	rcc.bytesBuff.Write(rcc.cacheBuff[0:ilen])
+	useLen := 0
+	line, err := rcc.bytesBuff.ReadBytes('\n')
+	useLen += len(line)
+	if err != nil {
+		fmt.Println(err)
+		return nil,err
+	}
+	if line[0] == '$'{
+		dataLen,err := strconv.Atoi(utils.Bytes2String(line[1:useLen-2]))
+		if nil != err || -1 == dataLen{
+			return nil,ErrRedisCacheMiss
+		}
+		item = new(RedisItem)
+		item.Value = make([]byte, dataLen+2)
+		valueReadLen := len(rcc.bytesBuff.Bytes())
+		copy(item.Value,rcc.bytesBuff.Bytes())
+		readLen := 0
+		if dataLen+2 > valueReadLen{
+			for{
+				readLen, err = rcc.conn.Read(item.Value[valueReadLen:])
+				if nil != err{
+					return nil,CACHECLIENT_ERR
+				}
+				valueReadLen += readLen
+				if valueReadLen == dataLen+2{
+					break
+				}
+			}
+		}
+		if !bytes.HasSuffix(item.Value, []byte("\r\n")) {
+			item.Value = nil
+			return nil,ErrRedisCorrupt
+		}
+		item.Value = item.Value[:dataLen]
+		return item,nil
+	}else{
+		return nil,ErrRedisCacheMiss
+	}
+}
+
+func redisSetCmd(rcc *RedisCacheClient,item *RedisItem)(err error){
+	rcc.bytesBuff.Reset()
+	if item.Expiration == 0{
+		rcc.bytesBuff.Write([]byte("*3\r\n$3\r\nSET\r\n$"))
+		rcc.bytesBuff.Write(utils.String2Bytes(strconv.Itoa(len(item.Key))))
+		rcc.bytesBuff.Write([]byte("\r\n"))
+		rcc.bytesBuff.Write(utils.String2Bytes(item.Key))
+		rcc.bytesBuff.Write([]byte("\r\n$"))
+		rcc.bytesBuff.Write(utils.String2Bytes(strconv.Itoa(len(item.Value))))
+		rcc.bytesBuff.Write([]byte("\r\n"))
+		rcc.bytesBuff.Write(item.Value)
+		rcc.bytesBuff.Write([]byte("\r\n"))
+	}else{
+		rcc.bytesBuff.Write([]byte("*5\r\n$3\r\nSET\r\n$"))
+		rcc.bytesBuff.Write(utils.String2Bytes(strconv.Itoa(len(item.Key))))
+		rcc.bytesBuff.Write([]byte("\r\n"))
+		rcc.bytesBuff.Write(utils.String2Bytes(item.Key))
+		rcc.bytesBuff.Write([]byte("\r\n$"))
+		rcc.bytesBuff.Write(utils.String2Bytes(strconv.Itoa(len(item.Value))))
+		rcc.bytesBuff.Write([]byte("\r\n"))
+		rcc.bytesBuff.Write(item.Value)
+		rcc.bytesBuff.Write([]byte("\r\n$2\r\nEX\r\n$"))
+		rcc.bytesBuff.Write(utils.String2Bytes(strconv.Itoa(bitsUint32(item.Expiration))))
+		rcc.bytesBuff.Write([]byte("\r\n"))
+		rcc.bytesBuff.Write(utils.String2Bytes(strconv.Itoa(int(item.Expiration))))
+		rcc.bytesBuff.Write([]byte("\r\n"))
+	}
+	_,err = rcc.conn.Write(rcc.bytesBuff.Bytes())
+	if nil != err{
+		return CACHECLIENT_ERR
+	}
+	rcc.cacheBuff=rcc.cacheBuff[0:]
+	ilen, err := rcc.conn.Read(rcc.cacheBuff)
+	if nil != err{
+		return CACHECLIENT_ERR
+	}
+	rcc.bytesBuff.Reset()
+	rcc.bytesBuff.Write(rcc.cacheBuff[0:ilen])
+	line, err := rcc.bytesBuff.ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+	if 0 == bytes.Compare(line,[]byte("+OK\r\n")) {
+		return nil
+	}
+	return ErrRedisNotStored
+}
+
+func redisDeleteExistsCmd(cmd []byte,rcc *RedisCacheClient,key string)(err error){
+	rcc.bytesBuff.Reset()
+	rcc.bytesBuff.Write(cmd)
+	rcc.bytesBuff.Write(utils.String2Bytes(strconv.Itoa(len(key))))
+	rcc.bytesBuff.Write([]byte("\r\n"))
+	rcc.bytesBuff.Write(utils.String2Bytes(key))
+	rcc.bytesBuff.Write([]byte("\r\n"))
+	_,err = rcc.conn.Write(rcc.bytesBuff.Bytes())
+	if nil != err{
+		return CACHECLIENT_ERR
+	}
+	rcc.cacheBuff=rcc.cacheBuff[0:]
+	ilen, err := rcc.conn.Read(rcc.cacheBuff)
+	if nil != err{
+		return CACHECLIENT_ERR
+	}
+	rcc.bytesBuff.Reset()
+	rcc.bytesBuff.Write(rcc.cacheBuff[0:ilen])
+	line, err := rcc.bytesBuff.ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+	if line[0] == ':' && len(line) > 2{
+		if line[1] == '1'{
+			return nil
+		}
+	}
+	return ErrMemCacheMiss
+}
+
 func (redisc *RedisCache)Get(key string)(value []byte,err error){
-	if false == checkKey(key){
+	if "" == key{
 		return nil,CACHEPARAM_ERR
 	}
 	redisc.lock.RLock()
@@ -132,19 +291,19 @@ func (redisc *RedisCache)Get(key string)(value []byte,err error){
 		redisc.lock.RUnlock()
 		item,err := redisc.clientPool.Get()
 		if nil == err{
-			mcc,ok := item.(*MemCacheClient)
+			rcc,ok := item.(*RedisCacheClient)
 			if ok{
 				defer redisc.clientPool.Put(item)
-				getItem,err := getCmd(mcc,key)
+				getItem,err := redisGetCmd(rcc,key)
 				if nil == err{
-					mcc.lastActiveTime = utils.GetNowUnixSec()
+					rcc.lastActiveTime = utils.GetNowUnixSec()
 					if nil != getItem{
 						return getItem.Value,nil
 					}
 					return nil,nil
 				}else{
 					if err == CACHECLIENT_ERR{
-						mcc.isAlive = false
+						rcc.isAlive = false
 					}
 				}
 				return nil,err
@@ -162,8 +321,8 @@ func (redisc *RedisCache)Get(key string)(value []byte,err error){
 	return nil,CACHECLIENT_NIL
 }
 
-func (redisc *RedisCache)Set(key string,value []byte,expire int)(err error){
-	if nil == value || false == checkKey(key){
+func (redisc *RedisCache)Set(key string,value []byte,expire uint32)(err error){
+	if nil == value || "" == key{
 		return CACHEPARAM_ERR
 	}
 	redisc.lock.RLock()
@@ -171,15 +330,15 @@ func (redisc *RedisCache)Set(key string,value []byte,expire int)(err error){
 		redisc.lock.RUnlock()
 		item,err := redisc.clientPool.Get()
 		if nil == err{
-			mcc,ok := item.(*MemCacheClient)
+			rcc,ok := item.(*RedisCacheClient)
 			if ok{
 				defer redisc.clientPool.Put(item)
-				newItem := &Item{Key:key,Value:value,Expiration:int32(expire)}
-				err = setCmd(mcc,newItem)
+				newItem := &RedisItem{Key:key,Value:value,Expiration:expire}
+				err = redisSetCmd(rcc,newItem)
 				if err == CACHECLIENT_ERR{
-					mcc.isAlive = false
+					rcc.isAlive = false
 				}else{
-					mcc.lastActiveTime = utils.GetNowUnixSec()
+					rcc.lastActiveTime = utils.GetNowUnixSec()
 				}
 				return err
 			}
@@ -197,7 +356,7 @@ func (redisc *RedisCache)Set(key string,value []byte,expire int)(err error){
 }
 
 func (redisc *RedisCache)Delete(key string)(sta bool,err error){
-	if false == checkKey(key){
+	if "" == key{
 		return false,CACHEPARAM_ERR
 	}
 	redisc.lock.RLock()
@@ -205,17 +364,17 @@ func (redisc *RedisCache)Delete(key string)(sta bool,err error){
 		redisc.lock.RUnlock()
 		item,err := redisc.clientPool.Get()
 		if nil == err{
-			mcc,ok := item.(*MemCacheClient)
+			rcc,ok := item.(*RedisCacheClient)
 			if ok{
 				defer redisc.clientPool.Put(item)
-				err = deleteCmd(mcc,key)
+				err = redisDeleteExistsCmd([]byte("*2\r\n$3\r\nDEL\r\n$"),rcc,key)
 				if nil == err{
 					return true,nil
 				}
 				if err == CACHECLIENT_ERR{
-					mcc.isAlive = false
+					rcc.isAlive = false
 				}else{
-					mcc.lastActiveTime = utils.GetNowUnixSec()
+					rcc.lastActiveTime = utils.GetNowUnixSec()
 				}
 				return false,err
 			}
@@ -230,4 +389,38 @@ func (redisc *RedisCache)Delete(key string)(sta bool,err error){
 	}
 	return false,CACHECLIENT_NIL
 }
-*/
+
+func (redisc *RedisCache)Exists(key string)(sta bool,err error){
+	if "" == key{
+		return false,CACHEPARAM_ERR
+	}
+	redisc.lock.RLock()
+	if nil != redisc.clientPool{
+		redisc.lock.RUnlock()
+		item,err := redisc.clientPool.Get()
+		if nil == err{
+			rcc,ok := item.(*RedisCacheClient)
+			if ok{
+				defer redisc.clientPool.Put(item)
+				err = redisDeleteExistsCmd([]byte("*2\r\n$6\r\nEXISTS\r\n$"),rcc,key)
+				if nil == err{
+					return true,nil
+				}
+				if err == CACHECLIENT_ERR{
+					rcc.isAlive = false
+				}else{
+					rcc.lastActiveTime = utils.GetNowUnixSec()
+				}
+				return false,err
+			}
+		}else{
+			if utils.CONNECTPOOL_NEEDSTOP == err{
+				if utils.CONNECTPOOL_STOP_SUC == redisc.Stop(){
+					return false,CACHESTOP_SUC
+				}
+			}
+			return false,CACHESERVER_ERR
+		}
+	}
+	return false,CACHECLIENT_NIL
+}

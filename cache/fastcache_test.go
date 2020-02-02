@@ -4,12 +4,12 @@ package cache
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 
-/*
+
 import(
 	"fmt"
 	"sync"
-//	"bytes"
-   // "encoding/gob"
+	"bytes"
+    "encoding/gob"
 	"testing"
 )
 
@@ -136,4 +136,3 @@ func BenchmarkFastcache(b *testing.B) {
 	cc.Stop()
 	fmt.Println("--------end test Fastcache cache Benchmark--------")
 }
-*/

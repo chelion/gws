@@ -16,11 +16,11 @@ const(
 type Args struct{
 	Key []byte
 	Data []byte
-	Expire int
+	Expire uint32
 }
 
 var(
-	isAliveData = Args{Key:nil,Data:nil,Expire:-1}
+	isAliveData = Args{Key:nil,Data:nil,Expire:0}
 )
 
 type FastCache struct{
@@ -90,7 +90,7 @@ func (fcc *FastCache)Start()(err error){
 				return nil,CACHESERVER_ERR
 			}
 			fc.isAlive = true
-			fc.args = Args{Key:make([]byte,0),Data:make([]byte,0),Expire:-1}
+			fc.args = Args{Key:make([]byte,0),Data:make([]byte,0),Expire:0}
 			fc.timeout = fcc.timeoutSec
 			fc.lastActiveTime = utils.GetNowUnixSec()
 			return utils.ConnectPoolItem(fc),nil
@@ -132,7 +132,7 @@ func (fcc *FastCache)Get(key string)(value []byte,err error){
 				defer fcc.clientPool.Put(item)
 				fc.args.Key = []byte(key)
 				fc.args.Data = nil
-				fc.args.Expire = -1
+				fc.args.Expire = 0
 				err =(fc.client).Call("FastCache.Get",fc.args, &value)
 				if nil == err{
 					fc.lastActiveTime = utils.GetNowUnixSec()
@@ -155,7 +155,7 @@ func (fcc *FastCache)Get(key string)(value []byte,err error){
 }
 
 
-func (fcc *FastCache)Set(key string,value []byte,expire int)(err error){
+func (fcc *FastCache)Set(key string,value []byte,expire uint32)(err error){
 	var sta bool = false
 	if nil == value || 0 == len(key) || len(key) >CACHEMAXSIZE || len(value) > CACHEMAXSIZE{
 		return CACHEPARAM_ERR
@@ -201,7 +201,7 @@ func (fcc *FastCache)Delete(key string)(sta bool,err error){
 				defer fcc.clientPool.Put(item)
 				fc.args.Key = []byte(key)
 				fc.args.Data = nil
-				fc.args.Expire = -1
+				fc.args.Expire = 0
 				err = (fc.client).Call("FastCache.Delete", fc.args, &sta)
 				if nil == err{
 					fc.lastActiveTime = utils.GetNowUnixSec()
@@ -235,7 +235,7 @@ func (fcc *FastCache)Exists(key string)(sta bool,err error){
 				defer fcc.clientPool.Put(item)
 				fc.args.Key = []byte(key)
 				fc.args.Data = nil
-				fc.args.Expire = -1
+				fc.args.Expire = 0
 				err = (fc.client).Call("FastCache.Exists", fc.args, &sta)
 				if nil == err{
 					fc.lastActiveTime = utils.GetNowUnixSec()

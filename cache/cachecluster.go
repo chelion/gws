@@ -173,7 +173,7 @@ func (cacheCluster *CacheCluster)Get(key string)(value []byte,err error){
 	return
 }
 
-func (cacheCluster *CacheCluster)Set(key string,value []byte,expire int)(err error){
+func (cacheCluster *CacheCluster)Set(key string,value []byte,expire uint32)(err error){
 	cacheCluster.rwLock.RLock()
 	cacheVirtualNode := cacheCluster.findCacheVirtualNode(key)
 	if nil == cacheVirtualNode || nil == cacheVirtualNode.csc || nil == cacheVirtualNode.csc.cache{
