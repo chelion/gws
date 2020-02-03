@@ -11,7 +11,7 @@ import(
 	"sync/atomic"
 	"github.com/chelion/gws/utils"
 )
-//缓存服务集群，采用一致性哈希算法，一个实体服务器实例化多个虚拟服务器
+//CRC32 Consistent Hashing
 var(
 	CLUSTERCACHE_PARAM_ERR = errors.New("cluster cache param error")
 	CLUSTERCACHE_NOSERVER_ERR = errors.New("can't find the the key cache server")
