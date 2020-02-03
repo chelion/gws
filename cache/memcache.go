@@ -14,7 +14,6 @@ import(
 )
 
 var (
-	versionCmd		= []byte("version \r\n")
 	ErrMemCacheMiss = errors.New("memcache: cache miss")
 	ErrMemNotStored = errors.New("memcache: item not stored")
 	ErrMemCorrupt = errors.New("memcache: corrupt get result read")
@@ -65,7 +64,7 @@ func (mcc *MemCacheClient)Close()(err error){
 
 func (mcc *MemCacheClient)IsAlive()(sta bool){
 	if utils.GetNowUnixSec() - mcc.lastActiveTime > mcc.timeout {
-		_,err := mcc.conn.Write(versionCmd)
+		_,err := mcc.conn.Write([]byte("version \r\n"))
 		if nil != err{
 			mcc.isAlive = false
 		}
@@ -144,7 +143,7 @@ func memCheckKey(key string) bool {
 }
 
 func memScanGetResponseLine(line []byte, it *MemItem) (size int64, err error) {
-	if len(line) < 2{
+	if len(line) < 2 && line[0] == 'V'{
 		return -1,ErrMemUnexpectedError
 	}
 	params := bytes.Split(line[:len(line)-2],[]byte(" "))
@@ -177,10 +176,7 @@ func memGetCmd(mcc *MemCacheClient,key string)(item *MemItem,err error){
 		if err != nil {
 			return nil,err
 		}
-		if line[0] == 'N' {
-			return nil,ErrMemCacheMiss
-		}
-		if line[0] == 'E'{
+		if line[0] == 'E'{//"END\r\n"
 			if ilen == useLen{
 				return nil,ErrMemCacheMiss
 			}
@@ -247,12 +243,15 @@ func memSetCmd(mcc *MemCacheClient,item *MemItem)(err error){
 		if err != nil {
 			return err
 		}
-		if line[0] == 'S'{
+		if line[0] == 'S'{//"STORED\r\n"
 			return nil
 		}
-		if line[0] == 'E'{
+		if line[0] == 'N'{//"NOT_STORED\r\n"
+			return ErrMemNotStored
+		}
+		if line[0] == 'E'{//"END\r\n"
 			if ilen == useLen{
-				return ErrMemNotStored
+				return ErrMemUnexpectedError
 			}
 			continue
 		}
@@ -280,13 +279,13 @@ func memDeleteCmd(mcc *MemCacheClient,key string) error {
 		if err != nil {
 			return err
 		}
-		if line[0] == 'D'{
+		if line[0] == 'D'{//"DELETED\r\n"
 			return nil
 		}
-		if line[0] == 'N'{
+		if line[0] == 'N'{//"NOT_FOUND\r\n"
 			return ErrMemCacheMiss
 		}
-		if line[0] == 'E'{
+		if line[0] == 'E'{//"END\r\n"
 			if ilen == useLen{
 				return ErrMemCacheMiss
 			}

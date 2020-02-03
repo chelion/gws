@@ -98,6 +98,7 @@ func BenchmarkMemCache(b *testing.B){
 			for j:=0;j<100;j++{
 				
 			name := "yilin"+strconv.Itoa(i)
+			
 			student := &Student{Name:name,Age:i,Addr:"shenzhen,china"}
 			var result bytes.Buffer
 			encoder := gob.NewEncoder(&result)
@@ -112,6 +113,7 @@ func BenchmarkMemCache(b *testing.B){
 			}else{
 				//fmt.Println("set success")
 			}
+			/*
 			gdata,err := cc.Get(name)
 			if nil == err{
 				if nil != gdata{
@@ -141,8 +143,8 @@ func BenchmarkMemCache(b *testing.B){
 					//fmt.Println("delete")
 				}
 			}
-			}
-			/*
+			
+			
 			sta,e := cc.Exists("hello")
 			if nil != e{
 				b.Errorf(e.Error())
@@ -156,6 +158,8 @@ func BenchmarkMemCache(b *testing.B){
 					fmt.Println("not exists")
 				}
 			}*/
+				
+			}
 			wg.Done()
 		}(i)
 	}
