@@ -77,7 +77,7 @@ func BenchmarkMemCache(b *testing.B){
 		Addr string
 	}
 	fmt.Println("--------start test memcache cache--------")
-	cc,err := NewMemCache(&CacheConfig{"tcp","127.0.0.1:11211",5,10,10})
+	cc,err := NewMemCache(&CacheConfig{"tcp","127.0.0.1:11211",1,5,10})
 	if nil != err{
 		b.Errorf("new memcache fail\n")
 		return

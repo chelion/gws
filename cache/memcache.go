@@ -308,15 +308,12 @@ func (memc *MemCache)Get(key string)(value []byte,err error){
 			if ok{
 				defer memc.clientPool.Put(item)
 				getItem,err := memGetCmd(mcc,key)
-				if nil == err{
+				if err == CACHECLIENT_ERR{
+					mcc.isAlive = false
+				}else{
 					mcc.lastActiveTime = utils.GetNowUnixSec()
 					if nil != getItem{
 						return getItem.Value,nil
-					}
-					return nil,nil
-				}else{
-					if err == CACHECLIENT_ERR{
-						mcc.isAlive = false
 					}
 				}
 				return nil,err
@@ -335,7 +332,7 @@ func (memc *MemCache)Get(key string)(value []byte,err error){
 }
 
 func (memc *MemCache)Set(key string,value []byte,expire uint32)(err error){
-	if nil == value || false == memCheckKey(key){
+	if nil == value || 0 == len(value) || false == memCheckKey(key){
 		return CACHEPARAM_ERR
 	}
 	memc.lock.RLock()
@@ -404,6 +401,9 @@ func (memc *MemCache)Delete(key string)(sta bool,err error){
 }
 
 func (memc *MemCache)Exists(key string)(sta bool,err error){
+	if false == memCheckKey(key){
+		return false,CACHEPARAM_ERR
+	}
 	item,err := memc.Get(key)
 	if nil != item{
 		return true,nil

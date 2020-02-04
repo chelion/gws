@@ -78,7 +78,7 @@ func BenchmarkRedisCache(b *testing.B){
 		Addr string
 	}
 	fmt.Println("--------start test rediscache cache--------")
-	cc,err := NewRedisCache(&CacheConfig{"tcp","127.0.0.1:6379",5,10,60})
+	cc,err := NewRedisCache(&CacheConfig{"tcp","127.0.0.1:6379",1,5,60})
 	if nil != err{
 		b.Errorf("new rediscache fail\n")
 		return

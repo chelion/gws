@@ -283,7 +283,7 @@ func redisDeleteExistsCmd(cmd []byte,rcc *RedisCacheClient,key string)(err error
 }
 
 func (redisc *RedisCache)Get(key string)(value []byte,err error){
-	if "" == key{
+	if 0 == len(key){
 		return nil,CACHEPARAM_ERR
 	}
 	redisc.lock.RLock()
@@ -295,15 +295,12 @@ func (redisc *RedisCache)Get(key string)(value []byte,err error){
 			if ok{
 				defer redisc.clientPool.Put(item)
 				getItem,err := redisGetCmd(rcc,key)
-				if nil == err{
+				if err == CACHECLIENT_ERR{
+					rcc.isAlive = false
+				}else{
 					rcc.lastActiveTime = utils.GetNowUnixSec()
 					if nil != getItem{
 						return getItem.Value,nil
-					}
-					return nil,nil
-				}else{
-					if err == CACHECLIENT_ERR{
-						rcc.isAlive = false
 					}
 				}
 				return nil,err
@@ -322,7 +319,7 @@ func (redisc *RedisCache)Get(key string)(value []byte,err error){
 }
 
 func (redisc *RedisCache)Set(key string,value []byte,expire uint32)(err error){
-	if nil == value || "" == key{
+	if nil == value || 0 == len(key) || 0 == len(value){
 		return CACHEPARAM_ERR
 	}
 	redisc.lock.RLock()
@@ -356,7 +353,7 @@ func (redisc *RedisCache)Set(key string,value []byte,expire uint32)(err error){
 }
 
 func (redisc *RedisCache)Delete(key string)(sta bool,err error){
-	if "" == key{
+	if 0 == len(key){
 		return false,CACHEPARAM_ERR
 	}
 	redisc.lock.RLock()
@@ -391,7 +388,7 @@ func (redisc *RedisCache)Delete(key string)(sta bool,err error){
 }
 
 func (redisc *RedisCache)Exists(key string)(sta bool,err error){
-	if "" == key{
+	if 0 == len(key){
 		return false,CACHEPARAM_ERR
 	}
 	redisc.lock.RLock()

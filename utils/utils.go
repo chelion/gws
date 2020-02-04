@@ -39,6 +39,19 @@ func IsWindows()(sta bool){
 	return false
 }
 
+func Int32ToBytes(n int32) []byte {
+	lenBytes := make([]byte, 4)
+	lenBytes[0] = byte(n >> 24)
+	lenBytes[1] = byte(n >> 16)
+	lenBytes[2] = byte(n >> 8)
+	lenBytes[3] = byte(n)
+	return lenBytes
+}
+
+func BytesToInt32(n []byte) int32 {
+	return int32(int32(n[0])<<24) + int32(int32(n[1])<<16) + int32(int32(n[2])<<8) + int32(n[3])
+}
+
 func GetStats()(*runtime.MemStats){
 	memStats := &runtime.MemStats{}
 	runtime.ReadMemStats(memStats)

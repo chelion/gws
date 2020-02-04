@@ -3,8 +3,11 @@ package cache
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 import(
+	"fmt"
 	"sync"
-	"net/rpc"
+	"net"
+	"bytes"
+	"errors"
 	"github.com/chelion/gws/utils"
 )
 const(
@@ -13,33 +16,36 @@ const(
 	CACHEMAXSIZE = 64 * 1024 - 16 - 4 - 1
 )
 
-type Args struct{
-	Key []byte
-	Data []byte
-	Expire uint32
-}
-
-var(
-	isAliveData = Args{Key:nil,Data:nil,Expire:0}
+var (
+	ErrFastCacheMiss = errors.New("fastcache: cache miss")
+	ErrFastNotStored = errors.New("fastcache: item not stored")
+	ErrFastCorrupt = errors.New("fastcache: corrupt get result read")
 )
+
+type FastItem struct {
+	Key string
+	Value []byte
+}
 
 type FastCache struct{
 	clientPool *utils.ConnectPool
 	config *CacheConfig
 	serverAddr string
 	netWork string
-	lock *sync.Mutex
+	lock *sync.RWMutex
 	timeoutSec int64
 	isStopped bool
 }
 
 type FastCacheClient struct{
-	client *rpc.Client
+	conn net.Conn
+	cacheBuff []byte
+	bytesBuff *bytes.Buffer
 	isAlive bool
 	timeout int64
 	lastActiveTime int64
-	args Args
 }
+
 
 func (fcc *FastCacheClient)Open()(err error){
 	return nil
@@ -47,173 +53,302 @@ func (fcc *FastCacheClient)Open()(err error){
 
 func (fcc *FastCacheClient)Close()(err error){
 	err = nil
-	if nil != fcc.client{
-		err = fcc.client.Close()
+	if nil != fcc.conn{
+		err = fcc.conn.Close()
+		fmt.Println("close")
 		if nil == err{
-			fcc.client = nil
+			fcc.conn = nil
 		}
 	}
 	return 
 }
 
 func (fcc *FastCacheClient)IsAlive()(sta bool){
-	if nil != fcc.client{
-		if utils.GetNowUnixSec() - fcc.lastActiveTime > fcc.timeout {
-			sta := false
-			err := (fcc.client).Call("FastCache.Ping",isAliveData, &sta)
-			if nil == err{
+	if utils.GetNowUnixSec() - fcc.lastActiveTime > fcc.timeout {
+		_,err := fcc.conn.Write([]byte("*PNG\r\n"))
+		if nil != err{
+			fcc.isAlive = false
+		}
+		fcc.cacheBuff=fcc.cacheBuff[0:]
+		ilen, err := fcc.conn.Read(fcc.cacheBuff)
+		if nil != err{
+			fcc.isAlive = false
+		}else{
+			if 0 == bytes.Compare(fcc.cacheBuff[:ilen],[]byte("+PNG\r\n")){
+				fmt.Println("good ping")
 				fcc.lastActiveTime = utils.GetNowUnixSec()
 				fcc.isAlive = true
 				return true
-			}else{
-				fcc.isAlive = false
 			}
 		}
-		return fcc.isAlive
 	}
-	return false
+	return fcc.isAlive
 }
 
 func NewFastCache(config *CacheConfig)(fcc *FastCache,err error){
-	fcc = &FastCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,lock:new(sync.Mutex),timeoutSec:config.TimeoutSec}
+	fcc = &FastCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,lock:new(sync.RWMutex),timeoutSec:config.TimeoutSec}
 	return fcc,nil
 }
 
-func (fcc *FastCache)Start()(err error){
-	fcc.lock.Lock()
-	defer fcc.lock.Unlock()
-	if true == fcc.isStopped{
-		clientPool,err := utils.NewConnectPool(fcc.config.ConnectMinNum,fcc.config.ConnectMaxNum,func ()(item utils.ConnectPoolItem,err error){
-			fc := &FastCacheClient{client:nil}
-			fc.client, err = rpc.Dial(fcc.netWork,fcc.serverAddr)
+func (fastc *FastCache)Start()(err error){
+	fastc.lock.Lock()
+	defer fastc.lock.Unlock()
+	if true == fastc.isStopped{
+		fmt.Println("start clientPool")
+		clientPool,err := utils.NewConnectPool(fastc.config.ConnectMinNum,fastc.config.ConnectMaxNum,func ()(item utils.ConnectPoolItem,err error){
+			rcc := &FastCacheClient{conn:nil}
+			rcc.conn, err = net.Dial(fastc.netWork,fastc.serverAddr)
 			if nil != err{
 				return nil,CACHESERVER_ERR
 			}
-			fc.isAlive = true
-			fc.args = Args{Key:make([]byte,0),Data:make([]byte,0),Expire:0}
-			fc.timeout = fcc.timeoutSec
-			fc.lastActiveTime = utils.GetNowUnixSec()
-			return utils.ConnectPoolItem(fc),nil
+			rcc.isAlive = true
+			rcc.timeout = fastc.timeoutSec
+			rcc.cacheBuff = make([]byte,512)
+			rcc.bytesBuff = new(bytes.Buffer)
+			rcc.lastActiveTime = utils.GetNowUnixSec()
+			return utils.ConnectPoolItem(rcc),nil
 		})
 		if nil != err{
+			
 			return err
 		}
-		fcc.clientPool = clientPool
-		if nil == fcc.clientPool.Start(fcc.timeoutSec){
-			fcc.isStopped = false
+		fastc.clientPool = clientPool
+		if nil == fastc.clientPool.Start(fastc.timeoutSec){
+			fastc.isStopped = false
+			fmt.Println("fastc.isActive")
 		}
+		fmt.Println("start------------end---------------",err)
 		return err
 	}
 	return nil
 }
 
-func (fcc *FastCache)Stop()(err error){
-	fcc.lock.Lock()
-	defer fcc.lock.Unlock()
-	if false == fcc.isStopped{
-		err = fcc.clientPool.Stop()
+func (fastc *FastCache)Stop()(err error){
+	fastc.lock.Lock()
+	defer fastc.lock.Unlock()
+	if false == fastc.isStopped{
+		err = fastc.clientPool.Stop()
 		if utils.CONNECTPOOL_STOP_SUC == err{
-			fcc.isStopped = true
+			fastc.isStopped = true
 		}
 		return err
 	}
 	return nil
 }
 
-func (fcc *FastCache)Get(key string)(value []byte,err error){
+
+func fastGetCmd(fcc *FastCacheClient,key string)(item *FastItem,err error){
+	fcc.bytesBuff.Reset()
+	fcc.bytesBuff.Write([]byte("*GET\r\n$"))
+	fcc.bytesBuff.Write(utils.Int32ToBytes(int32(len(key))))
+	fcc.bytesBuff.Write(utils.Int32ToBytes(0))
+	fcc.bytesBuff.Write([]byte("\r\n"))
+	fcc.bytesBuff.Write(utils.String2Bytes(key))
+	fcc.bytesBuff.Write([]byte("\r\n"))
+	_,err = fcc.conn.Write(fcc.bytesBuff.Bytes())
+	if nil != err{
+		return nil,CACHECLIENT_ERR
+	}
+	fcc.cacheBuff=fcc.cacheBuff[0:]
+	ilen, err := fcc.conn.Read(fcc.cacheBuff)
+	if nil != err{
+		return nil,CACHECLIENT_ERR
+	}
+	if 7 <= ilen && fcc.cacheBuff[0] == '+'{
+		dataLen := utils.BytesToInt32(fcc.cacheBuff[1:5])
+		if 0 == dataLen{
+			return nil,ErrFastCacheMiss
+		}
+		item = new(FastItem)
+		item.Value = make([]byte, dataLen+2)
+		valueReadLen := ilen-7
+		copy(item.Value,fcc.cacheBuff[7:ilen])
+		readLen := 0
+		if int(dataLen+2) > valueReadLen{
+			for{
+				readLen, err = fcc.conn.Read(item.Value[valueReadLen:])
+				if nil != err{
+					return nil,CACHECLIENT_ERR
+				}
+				valueReadLen += readLen
+				if valueReadLen == int(dataLen+2){
+					break
+				}
+			}
+		}
+		if !bytes.HasSuffix(item.Value, []byte("\r\n")) {
+			item.Value = nil
+			return nil,ErrFastCorrupt
+		}
+		item.Value = item.Value[:dataLen]
+		return item,nil
+	}else{
+		return nil,ErrFastCacheMiss
+	}
+}
+
+func fastSetCmd(fcc *FastCacheClient,item *FastItem)(err error){
+	fcc.bytesBuff.Reset()
+	fcc.bytesBuff.Write([]byte("*SET\r\n$"))
+	fcc.bytesBuff.Write(utils.Int32ToBytes(int32(len(item.Key))))
+	fcc.bytesBuff.Write(utils.Int32ToBytes(int32(len(item.Value))))
+	fcc.bytesBuff.Write([]byte("\r\n"))
+	fcc.bytesBuff.Write(utils.String2Bytes(item.Key))
+	fcc.bytesBuff.Write([]byte("\r\n"))
+	fcc.bytesBuff.Write(item.Value)
+	fcc.bytesBuff.Write([]byte("\r\n"))
+	
+	_,err = fcc.conn.Write(fcc.bytesBuff.Bytes())
+	if nil != err{
+		return CACHECLIENT_ERR
+	}
+	fcc.cacheBuff=fcc.cacheBuff[0:]
+	ilen, err := fcc.conn.Read(fcc.cacheBuff)
+	if nil != err{
+		return CACHECLIENT_ERR
+	}
+	fcc.bytesBuff.Reset()
+	fcc.bytesBuff.Write(fcc.cacheBuff[0:ilen])
+	line, err := fcc.bytesBuff.ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+	if 0 == bytes.Compare(line,[]byte("+OK\r\n")) {
+		return nil
+	}
+	return ErrFastNotStored
+}
+
+func fastDeleteExistsCmd(cmd []byte,fcc *FastCacheClient,key string)(err error){
+	fcc.bytesBuff.Reset()
+	fcc.bytesBuff.Write(cmd)
+	fcc.bytesBuff.Write(utils.Int32ToBytes(int32(len(key))))
+	fcc.bytesBuff.Write(utils.Int32ToBytes(0))
+	fcc.bytesBuff.Write([]byte("\r\n"))
+	fcc.bytesBuff.Write(utils.String2Bytes(key))
+	fcc.bytesBuff.Write([]byte("\r\n"))
+	_,err = fcc.conn.Write(fcc.bytesBuff.Bytes())
+	if nil != err{
+		return CACHECLIENT_ERR
+	}
+	fcc.cacheBuff=fcc.cacheBuff[0:]
+	ilen, err := fcc.conn.Read(fcc.cacheBuff)
+	if nil != err{
+		return CACHECLIENT_ERR
+	}
+	fcc.bytesBuff.Reset()
+	fcc.bytesBuff.Write(fcc.cacheBuff[0:ilen])
+	line, err := fcc.bytesBuff.ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+	if len(line) > 2 && line[0] == ':'{
+		if line[1] == '1'{
+			return nil
+		}
+	}
+	return ErrMemCacheMiss
+}
+
+
+func (fastc *FastCache)Get(key string)(value []byte,err error){
 	if 0 == len(key) || len(key) >CACHEMAXSIZE{
 		return nil,CACHEPARAM_ERR
 	}
-	if nil != fcc.clientPool{
-		item,err := fcc.clientPool.Get()
+	fastc.lock.RLock()
+	if nil != fastc.clientPool{
+		fastc.lock.RUnlock()
+		item,err := fastc.clientPool.Get()
 		if nil == err{
-			fc,ok := item.(*FastCacheClient)
+			fcc,ok := item.(*FastCacheClient)
 			if ok{
-				defer fcc.clientPool.Put(item)
-				fc.args.Key = []byte(key)
-				fc.args.Data = nil
-				fc.args.Expire = 0
-				err =(fc.client).Call("FastCache.Get",fc.args, &value)
-				if nil == err{
-					fc.lastActiveTime = utils.GetNowUnixSec()
-					return value,nil
+				defer fastc.clientPool.Put(item)
+				getItem,err := fastGetCmd(fcc,key)
+				if err == CACHECLIENT_ERR{
+					fcc.isAlive = false
 				}else{
-					fc.isAlive = false
-					return nil,CACHECLIENT_ERR
+					fcc.lastActiveTime = utils.GetNowUnixSec()
+					if nil != getItem{
+						return getItem.Value,nil
+					}
 				}
+				return nil,err
 			}
 		}else{
 			if utils.CONNECTPOOL_NEEDSTOP == err{
-				if utils.CONNECTPOOL_STOP_SUC == fcc.Stop(){
+				if utils.CONNECTPOOL_STOP_SUC == fastc.Stop(){
 					return nil,CACHESTOP_SUC
 				}
 			}
 			return nil,CACHESERVER_ERR
 		}
 	}
+	fastc.lock.RUnlock()
 	return nil,CACHECLIENT_NIL
 }
 
 
-func (fcc *FastCache)Set(key string,value []byte,expire uint32)(err error){
-	var sta bool = false
-	if nil == value || 0 == len(key) || len(key) >CACHEMAXSIZE || len(value) > CACHEMAXSIZE{
+func (fastc *FastCache)Set(key string,value []byte,expire uint32)(err error){
+	if nil == value || 0 == len(value) || 0 == len(key) || 
+		len(key) >CACHEMAXSIZE || len(value) > CACHEMAXSIZE || len(key)+len(value) > CACHEMAXSIZE{
 		return CACHEPARAM_ERR
 	}
-	if nil != fcc.clientPool{
-		item,err := fcc.clientPool.Get()
+	fastc.lock.RLock()
+	if nil != fastc.clientPool{
+		fastc.lock.RUnlock()
+		item,err := fastc.clientPool.Get()
 		if nil == err{
-			fc,ok := item.(*FastCacheClient)
+			rcc,ok := item.(*FastCacheClient)
 			if ok{
-				defer fcc.clientPool.Put(item)
-				fc.args.Key = []byte(key)
-				fc.args.Data = value
-				fc.args.Expire = expire
-				err = (fc.client).Call("FastCache.Set",fc.args, &sta)
-				if nil != err{
-					fc.isAlive = false
-					return CACHECLIENT_ERR
+				defer fastc.clientPool.Put(item)
+				newItem := &FastItem{Key:key,Value:value}
+				err = fastSetCmd(rcc,newItem)
+				if err == CACHECLIENT_ERR{
+					rcc.isAlive = false
+				}else{
+					rcc.lastActiveTime = utils.GetNowUnixSec()
 				}
-				fc.lastActiveTime = utils.GetNowUnixSec()
-				return nil
+				return err
 			}
 		}else{
 			if utils.CONNECTPOOL_NEEDSTOP == err{
-				if utils.CONNECTPOOL_STOP_SUC == fcc.Stop(){
+				if utils.CONNECTPOOL_STOP_SUC == fastc.Stop(){
 					return CACHESTOP_SUC
 				}
 			}
 			return CACHESERVER_ERR
 		}
 	}
+	fastc.lock.RUnlock()
 	return CACHECLIENT_NIL
 }
 
-func (fcc *FastCache)Delete(key string)(sta bool,err error){
+func (fastc *FastCache)Delete(key string)(sta bool,err error){
 	if 0 == len(key) || len(key) >CACHEMAXSIZE{
 		return false,CACHEPARAM_ERR
 	}
-	if nil != fcc.clientPool{
-		item,err := fcc.clientPool.Get()
+	fastc.lock.RLock()
+	if nil != fastc.clientPool{
+		fastc.lock.RUnlock()
+		item,err := fastc.clientPool.Get()
 		if nil == err{
-			fc,ok := item.(*FastCacheClient)
+			fcc,ok := item.(*FastCacheClient)
 			if ok{
-				defer fcc.clientPool.Put(item)
-				fc.args.Key = []byte(key)
-				fc.args.Data = nil
-				fc.args.Expire = 0
-				err = (fc.client).Call("FastCache.Delete", fc.args, &sta)
+				defer fastc.clientPool.Put(item)
+				err = fastDeleteExistsCmd([]byte("*DEL\r\n$"),fcc,key)
 				if nil == err{
-					fc.lastActiveTime = utils.GetNowUnixSec()
-					return sta,nil
-				}else{
-					fc.isAlive = false
-					return false,CACHECLIENT_ERR
+					return true,nil
 				}
+				if err == CACHECLIENT_ERR{
+					fcc.isAlive = false
+				}else{
+					fcc.lastActiveTime = utils.GetNowUnixSec()
+				}
+				return false,err
 			}
 		}else{
 			if utils.CONNECTPOOL_NEEDSTOP == err{
-				if utils.CONNECTPOOL_STOP_SUC == fcc.Stop(){
+				if utils.CONNECTPOOL_STOP_SUC == fastc.Stop(){
 					return false,CACHESTOP_SUC
 				}
 			}
@@ -223,31 +358,32 @@ func (fcc *FastCache)Delete(key string)(sta bool,err error){
 	return false,CACHECLIENT_NIL
 }
 
-func (fcc *FastCache)Exists(key string)(sta bool,err error){
+func (fastc *FastCache)Exists(key string)(sta bool,err error){
 	if 0 == len(key) || len(key) >CACHEMAXSIZE{
 		return false,CACHEPARAM_ERR
 	}
-	if nil != fcc.clientPool{
-		item,err := fcc.clientPool.Get()
+	fastc.lock.RLock()
+	if nil != fastc.clientPool{
+		fastc.lock.RUnlock()
+		item,err := fastc.clientPool.Get()
 		if nil == err{
-			fc,ok := item.(*FastCacheClient)
+			fcc,ok := item.(*FastCacheClient)
 			if ok{
-				defer fcc.clientPool.Put(item)
-				fc.args.Key = []byte(key)
-				fc.args.Data = nil
-				fc.args.Expire = 0
-				err = (fc.client).Call("FastCache.Exists", fc.args, &sta)
+				defer fastc.clientPool.Put(item)
+				err = fastDeleteExistsCmd([]byte("*EXS\r\n$"),fcc,key)
 				if nil == err{
-					fc.lastActiveTime = utils.GetNowUnixSec()
-					return sta,nil
-				}else{
-					fc.isAlive = false
-					return false,CACHECLIENT_ERR
+					return true,nil
 				}
+				if err == CACHECLIENT_ERR{
+					fcc.isAlive = false
+				}else{
+					fcc.lastActiveTime = utils.GetNowUnixSec()
+				}
+				return false,err
 			}
 		}else{
 			if utils.CONNECTPOOL_NEEDSTOP == err{
-				if utils.CONNECTPOOL_STOP_SUC == fcc.Stop(){
+				if utils.CONNECTPOOL_STOP_SUC == fastc.Stop(){
 					return false,CACHESTOP_SUC
 				}
 			}
