@@ -3,7 +3,7 @@ package cache
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 import(
-	"fmt"
+	"io"
 	"sync"
 	"net"
 	"bytes"
@@ -55,7 +55,6 @@ func (fcc *FastCacheClient)Close()(err error){
 	err = nil
 	if nil != fcc.conn{
 		err = fcc.conn.Close()
-		fmt.Println("close")
 		if nil == err{
 			fcc.conn = nil
 		}
@@ -68,6 +67,7 @@ func (fcc *FastCacheClient)IsAlive()(sta bool){
 		_,err := fcc.conn.Write([]byte("*PNG\r\n"))
 		if nil != err{
 			fcc.isAlive = false
+			return fcc.isAlive 
 		}
 		fcc.cacheBuff=fcc.cacheBuff[0:]
 		ilen, err := fcc.conn.Read(fcc.cacheBuff)
@@ -75,7 +75,6 @@ func (fcc *FastCacheClient)IsAlive()(sta bool){
 			fcc.isAlive = false
 		}else{
 			if 0 == bytes.Compare(fcc.cacheBuff[:ilen],[]byte("+PNG\r\n")){
-				fmt.Println("good ping")
 				fcc.lastActiveTime = utils.GetNowUnixSec()
 				fcc.isAlive = true
 				return true
@@ -94,7 +93,6 @@ func (fastc *FastCache)Start()(err error){
 	fastc.lock.Lock()
 	defer fastc.lock.Unlock()
 	if true == fastc.isStopped{
-		fmt.Println("start clientPool")
 		clientPool,err := utils.NewConnectPool(fastc.config.ConnectMinNum,fastc.config.ConnectMaxNum,func ()(item utils.ConnectPoolItem,err error){
 			rcc := &FastCacheClient{conn:nil}
 			rcc.conn, err = net.Dial(fastc.netWork,fastc.serverAddr)
@@ -115,9 +113,7 @@ func (fastc *FastCache)Start()(err error){
 		fastc.clientPool = clientPool
 		if nil == fastc.clientPool.Start(fastc.timeoutSec){
 			fastc.isStopped = false
-			fmt.Println("fastc.isActive")
 		}
-		fmt.Println("start------------end---------------",err)
 		return err
 	}
 	return nil
@@ -152,7 +148,9 @@ func fastGetCmd(fcc *FastCacheClient,key string)(item *FastItem,err error){
 	fcc.cacheBuff=fcc.cacheBuff[0:]
 	ilen, err := fcc.conn.Read(fcc.cacheBuff)
 	if nil != err{
-		return nil,CACHECLIENT_ERR
+		if (ilen == 0 && err == io.EOF) || bytes.Contains(utils.String2Bytes(err.Error()),[]byte("close")){
+			return nil,CACHECLIENT_ERR
+		}
 	}
 	if 7 <= ilen && fcc.cacheBuff[0] == '+'{
 		dataLen := utils.BytesToInt32(fcc.cacheBuff[1:5])

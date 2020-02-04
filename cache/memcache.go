@@ -67,6 +67,7 @@ func (mcc *MemCacheClient)IsAlive()(sta bool){
 		_,err := mcc.conn.Write([]byte("version \r\n"))
 		if nil != err{
 			mcc.isAlive = false
+			return mcc.isAlive
 		}
 		mcc.cacheBuff=mcc.cacheBuff[0:]
 		_, err = mcc.conn.Read(mcc.cacheBuff)

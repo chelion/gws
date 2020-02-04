@@ -67,6 +67,7 @@ func (rcc *RedisCacheClient)IsAlive()(sta bool){
 		_,err := rcc.conn.Write([]byte("*1\r\n$4\r\nPING\r\n"))
 		if nil != err{
 			rcc.isAlive = false
+			return rcc.isAlive
 		}
 		rcc.cacheBuff=rcc.cacheBuff[0:]
 		ilen, err := rcc.conn.Read(rcc.cacheBuff)

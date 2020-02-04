@@ -3,11 +3,9 @@ package main
 import(
 	"io"
 	"fmt"
-	"io/ioutil"
 	"errors"
 	"net"
 	"bytes"
-	"bufio"
 	"github.com/chelion/gws/log"
 	"github.com/chelion/gws/utils"
 	"github.com/chelion/gws/configure"
@@ -21,7 +19,7 @@ const(
 )
 
 var(
-	//byteBufferPool *utils.ByteBufferPool = utils.NewByteBufferPool(BYTEBUFF_SIZE,1024)
+	logger log.Log
 	CACHECLIENT_NIL  = errors.New("client is nil")
 	CACHEPARAM_ERROR = errors.New("param is error")
 	CACHEMAXSIZE_OVER = errors.New("cache over max size")
@@ -124,11 +122,13 @@ const(
 )
 
 func serverConn(fcc *FastCache,conn net.Conn){
-	var err error
+	//不用bufio提高速度
 	var key []byte
 	var value []byte
-	var byteBuff bytes.Buffer
-	bufioReader := bufio.NewReaderSize(conn,4096)
+	var keyvalueLenBytes = make([]byte,11)
+	var cacheBytes = make([]byte,4096)
+	var byteReadBuff bytes.Buffer
+	var byteWriteBuff bytes.Buffer
 	status := STATUS_CMD
 	cmdType := byte(' ')
 	keyLen := 0
@@ -140,11 +140,17 @@ func serverConn(fcc *FastCache,conn net.Conn){
 				cmdType = byte(' ')
 				keyLen = 0
 				valueLen = 0
-				line,err := bufioReader.ReadBytes('\n')
+				cacheBytes = cacheBytes[0:]
+				rlen,err := conn.Read(cacheBytes)
 				if nil != err{
-					fmt.Println("cmd",err)
-					if err == io.EOF || bytes.Contains(utils.String2Bytes(err.Error()),[]byte("forcibly closed")){
-						fmt.Println("close")
+					logger.Println(err)
+					return
+				}
+				byteReadBuff.Write(cacheBytes[0:rlen])
+				line,err := byteReadBuff.ReadBytes('\n')
+				if nil != err{
+					if err == io.EOF{
+						logger.Println(err)
 						return
 					}
 				}
@@ -162,6 +168,7 @@ func serverConn(fcc *FastCache,conn net.Conn){
 						case 'P':{
 							_,err = conn.Write([]byte("+PNG\r\n"))
 							if nil != err{
+								logger.Println(err)
 								return
 							}
 							status = STATUS_CMD
@@ -178,17 +185,19 @@ func serverConn(fcc *FastCache,conn net.Conn){
 				}
 			}
 			case STATUS_KEYVALUELEN:{
-				line,err := ioutil.ReadAll(io.LimitReader(bufioReader,11))
-				if nil != err{
-					fmt.Println("keyvaluelen",err)
-					if err == io.EOF || bytes.Contains(utils.String2Bytes(err.Error()),[]byte("forcibly closed")){
-						fmt.Println("close")
+				if byteReadBuff.Len() < 11{
+					cacheBytes = cacheBytes[0:]
+					rlen,err := conn.Read(cacheBytes)
+					if nil != err{
+						logger.Println(err)
 						return
 					}
+					byteReadBuff.Write(cacheBytes[0:rlen])
 				}
-				if 11 == len(line) && '$' == line[0]{
-					keyLen = int(utils.BytesToInt32(line[1:5]))
-					valueLen = int(utils.BytesToInt32(line[5:9]))
+				byteReadBuff.Read(keyvalueLenBytes[0:])
+				if '$' == keyvalueLenBytes[0]{
+					keyLen = int(utils.BytesToInt32(keyvalueLenBytes[1:5]))
+					valueLen = int(utils.BytesToInt32(keyvalueLenBytes[5:9]))
 					if keyLen > CACHEITEMMAXSIZE || valueLen > CACHEITEMMAXSIZE ||
 					(keyLen+valueLen) > CACHEITEMMAXSIZE{
 						conn.Write([]byte("-Error\r\n"))
@@ -201,56 +210,69 @@ func serverConn(fcc *FastCache,conn net.Conn){
 				}
 			}
 			case STATUS_KEY:{
-				key, err = ioutil.ReadAll(io.LimitReader(bufioReader,int64(keyLen+2)))
-				if nil != err || !bytes.HasSuffix(key, []byte("\r\n")) {
-					fmt.Println("key",err)
-					conn.Write([]byte("-Error\r\n"))
-					if err == io.EOF || bytes.Contains(utils.String2Bytes(err.Error()),[]byte("forcibly closed")){
-						fmt.Println("close")
-						return
+				for{
+					if byteReadBuff.Len() < keyLen+2{
+						cacheBytes = cacheBytes[0:]
+						rlen,err := conn.Read(cacheBytes)
+						if nil != err{
+							logger.Println(err)
+							return
+						}
+						byteReadBuff.Write(cacheBytes[0:rlen])
+					}else{
+						break
 					}
+				}
+				key = make([]byte,keyLen+2)
+				byteReadBuff.Read(key[0:])
+				if !bytes.HasSuffix(key, []byte("\r\n")) {
+					conn.Write([]byte("-Error\r\n"))
+					return
 				}
 				if cmdType == 'S'{
 					status = STATUS_VALUE
 				}else{
-					byteBuff.Reset()
+					byteWriteBuff.Reset()
 					switch cmdType{
 						case 'G':{
 							value = fcc.cache.Get(nil,key[0:keyLen])
-							byteBuff.Write([]byte("+"))
+							byteWriteBuff.Write([]byte("+"))
 							if nil != value{
-								byteBuff.Write(utils.Int32ToBytes(int32(len(value))))
-								byteBuff.Write([]byte("\r\n"))
-								byteBuff.Write(value)
+								byteWriteBuff.Write(utils.Int32ToBytes(int32(len(value))))
+								byteWriteBuff.Write([]byte("\r\n"))
+								byteWriteBuff.Write(value)
 							}else{
-								byteBuff.Write(utils.Int32ToBytes(0))
+								byteWriteBuff.Write(utils.Int32ToBytes(0))
 							}
-							byteBuff.Write([]byte("\r\n"))
-							_,err = conn.Write(byteBuff.Bytes())
+							byteWriteBuff.Write([]byte("\r\n"))
+							_,err := conn.Write(byteWriteBuff.Bytes())
 							if nil != err{
+								logger.Println(err)
 								return
 							}
 						}
 						case 'E':{
 							if fcc.cache.Has(key[0:keyLen]){
-								byteBuff.Write([]byte(":1\r\n"))
+								byteWriteBuff.Write([]byte(":1\r\n"))
 							}else{
-								byteBuff.Write([]byte(":0\r\n"))
+								byteWriteBuff.Write([]byte(":0\r\n"))
 							}
-							_,err = conn.Write(byteBuff.Bytes())
+							_,err := conn.Write(byteWriteBuff.Bytes())
 							if nil != err{
+								logger.Println(err)
 								return
 							}
 						}
 						case 'D':{
 							if fcc.cache.Has(key[0:keyLen]){
 								fcc.cache.Del(key[0:keyLen])
-								byteBuff.Write([]byte(":1\r\n"))
+								byteWriteBuff.Write([]byte(":1\r\n"))
 							}else{
-								byteBuff.Write([]byte(":0\r\n"))
+								byteWriteBuff.Write([]byte(":0\r\n"))
 							}
-							_,err = conn.Write(byteBuff.Bytes())
+							_,err := conn.Write(byteWriteBuff.Bytes())
 							if nil != err{
+								logger.Println(err)
 								return
 							}
 						}
@@ -259,18 +281,29 @@ func serverConn(fcc *FastCache,conn net.Conn){
 				}
 			}
 			case STATUS_VALUE:{
-				value, err = ioutil.ReadAll(io.LimitReader(bufioReader,int64(valueLen+2)))
-				if nil != err || !bytes.HasSuffix(value, []byte("\r\n")){
-					fmt.Println("value",err)
-					conn.Write([]byte("-Error\r\n"))
-					if err == io.EOF || bytes.Contains(utils.String2Bytes(err.Error()),[]byte("forcibly closed")){
-						fmt.Println("close")
-						return
+				for{
+					if byteReadBuff.Len() < valueLen+2{
+						cacheBytes = cacheBytes[0:]
+						rlen,err := conn.Read(cacheBytes)
+						if nil != err{
+							logger.Println(err)
+							return
+						}
+						byteReadBuff.Write(cacheBytes[0:rlen])
+					}else{
+						break
 					}
 				}
+				value = make([]byte,valueLen+2)
+				byteReadBuff.Read(value[0:])
+				if !bytes.HasSuffix(value, []byte("\r\n")){
+					conn.Write([]byte("-Error\r\n"))
+					return
+				}
 				fcc.cache.Set(key[0:keyLen],value[0:valueLen])
-				_,err = conn.Write([]byte("+OK\r\n"))
+				_,err := conn.Write([]byte("+OK\r\n"))
 				if nil != err{
+					logger.Println(err)
 					return
 				}
 				status = STATUS_CMD
@@ -280,7 +313,7 @@ func serverConn(fcc *FastCache,conn net.Conn){
 }
 
 func main(){
-	var logger log.Log
+	
 	config,err := configure.NewIniConfigure("./server.ini")
 	if nil != err{
 		fmt.Println(err)
