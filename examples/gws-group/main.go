@@ -45,14 +45,13 @@ func main(){
 			ctx.Data(200,"text/html; charset=utf-8",utils.String2Bytes("Group1,Hello, World!"))
 		})
 	}
-	
+	/*
 	group2 := g.Group("/v2")
 	{
 		group2.GET("/",func(ctx *gws.Context){
 			ctx.Data(200,"text/html; charset=utf-8",utils.String2Bytes("Group2,Hello, World!"))
 		})
-	}
-	
+	}*/
 	g.Start()
 	defer g.Stop()
 }

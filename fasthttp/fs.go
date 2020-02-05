@@ -726,7 +726,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			}
 		} else if err != nil {
 			ctx.Logger().Printf("cannot open file %q: %s", filePath, err)
-			ctx.Error("Cannot open requested path", StatusNotFound)
+			ctx.Error("Cannot find", StatusNotFound)
 			return
 		}
 

@@ -268,7 +268,7 @@ func (r *Router) Handler(rCtx *fasthttp.RequestCtx) {
 			// Try to fix the request path
 			if r.RedirectFixedPath {
 				fixedPath, found := root.findCaseInsensitivePath(
-					CleanPath(path),
+					string(rCtx.URI().Path()),
 					r.RedirectTrailingSlash,
 				)
 
