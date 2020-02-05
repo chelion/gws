@@ -21,7 +21,7 @@ func TestFastCache(t *testing.T){
 		Addr string
 	}
 	fmt.Println("--------start test Fastcache cache--------")
-	cc,err := NewFastCache(&CacheConfig{"tcp","127.0.0.1:11811",5,10,30})
+	cc,err := NewFastCache(&CacheConfig{"tcp","127.0.0.1:11811",5,10,50})
 	if nil != err{
 		t.Errorf("new Fastcache fail\n")
 		return
@@ -78,7 +78,7 @@ func BenchmarkFastCache(b *testing.B) {
 		Addr string
 	}
 	fmt.Println("--------start test FastCache cache--------")
-	cc,err := NewFastCache(&CacheConfig{"tcp","127.0.0.1:11811",1,5,10})
+	cc,err := NewFastCache(&CacheConfig{"tcp","127.0.0.1:11811",1,5,50})
 	if nil != err{
 		b.Errorf("new FastCache fail\n")
 		return
@@ -90,7 +90,7 @@ func BenchmarkFastCache(b *testing.B) {
 	}else{
 		fmt.Println("FastCache cache init succes")
 	}
-	defer cc.Stop()
+	defer cc.Stop()	
 	wg := sync.WaitGroup{}
 	b.N = 1000 * 100
 	wg.Add(1000)

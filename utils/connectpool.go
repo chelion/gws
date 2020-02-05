@@ -33,7 +33,6 @@ type ConnectPool struct{
 	lock *sync.RWMutex
 	isStoped bool
 	failFlag bool
-	needCreate chan struct{}
 	connectPoolItems chan ConnectPoolItem
 }
 
@@ -53,7 +52,6 @@ func (connectPool *ConnectPool)Start(timeoutSec int64)(error){//超时后就返�
 	var cnt int64 = 0
 	connectPool.lock.Lock()
 	if true == connectPool.isStoped{
-		connectPool.needCreate = make(chan struct{},connectPool.maxNum)
 		connectPool.connectPoolItems = make(chan ConnectPoolItem,connectPool.maxNum)
 		connectPool.isStoped = false
 	}else{
@@ -74,7 +72,6 @@ func (connectPool *ConnectPool)Start(timeoutSec int64)(error){//超时后就返�
 								}
 							}
 							default:{
-								close(connectPool.needCreate)
 								close(connectPool.connectPoolItems)
 								connectPool.lock.Unlock()
 								return e
@@ -107,11 +104,21 @@ func (connectPool *ConnectPool)Stop()(err error){
 		connectPool.lock.Unlock()
 		return CONNECTPOOL_STOPPED_ERR
 	}
-	close(connectPool.needCreate)
-	close(connectPool.connectPoolItems)
-	connectPool.isStoped = true
-	connectPool.lock.Unlock()
-	return CONNECTPOOL_STOP_SUC
+	for{
+		select{
+			case connectPoolItem,ok := <-connectPool.connectPoolItems:{
+				if ok{
+					connectPoolItem.Close()
+				}
+			}
+			default:{
+				close(connectPool.connectPoolItems)
+				connectPool.isStoped = true
+				connectPool.lock.Unlock()
+				return CONNECTPOOL_STOP_SUC
+			}
+		}  
+	}
 }
 
 func (connectPool *ConnectPool)newConnectPoolItem(){
@@ -139,6 +146,18 @@ func (connectPool *ConnectPool)newConnectPoolItem(){
 			connectPool.lock.Unlock()
 		}
 	}
+}
+
+func (connectPool *ConnectPool)GetCurrentIdleNum()int64{
+	var idleNum int64
+	connectPool.lock.Lock()
+	if connectPool.isStoped{
+		connectPool.lock.Unlock()
+		return 0
+	}
+	idleNum = atomic.LoadInt64(&connectPool.idleNum)
+	connectPool.lock.Unlock()
+	return idleNum
 }
 
 func (connectPool *ConnectPool)Get()(ConnectPoolItem,error){

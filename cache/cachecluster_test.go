@@ -2,7 +2,7 @@ package cache
 // Copyright 2018 chelion. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
-
+/*
 import(
 	"fmt"
 	"sync"
@@ -49,3 +49,4 @@ func BenchmarkCacheCluster(b *testing.B){
 	b.N = 30 * 50000
 	wg.Wait()
 }
+*/

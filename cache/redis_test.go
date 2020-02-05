@@ -13,7 +13,7 @@ import(
 	"testing"
 )
 
-
+/*
 func TestRedisCache(t *testing.T){
 	type Student struct{
 		Name string
@@ -70,7 +70,7 @@ func TestRedisCache(t *testing.T){
 	fmt.Println("--------end test rediscache cache--------")
 }
 
-
+*/
 func BenchmarkRedisCache(b *testing.B){
 	type Student struct{
 		Name string

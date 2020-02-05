@@ -9,6 +9,7 @@ import(
 	"fmt"
 	"net"
 	"sync"
+	"time"
 	"bytes"
 	"errors"
 	"strconv"
@@ -29,6 +30,7 @@ type RedisCache struct{
 	lock *sync.RWMutex
 	timeoutSec int64
 	isStopped bool
+	stopChan chan struct{} 
 }
 
 type RedisCacheClient struct{
@@ -87,8 +89,38 @@ func (rcc *RedisCacheClient)IsAlive()(sta bool){
 
 
 func NewRedisCache(config *CacheConfig)(redisc *RedisCache,err error){
-	redisc = &RedisCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,lock:new(sync.RWMutex),timeoutSec:config.TimeoutSec}
+	redisc = &RedisCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,
+		lock:new(sync.RWMutex),timeoutSec:config.TimeoutSec,stopChan:make(chan struct{})}
 	return redisc,nil
+}
+
+func (redisc *RedisCache)tick(){
+	var i int64
+	ticker := time.NewTicker(time.Duration(redisc.timeoutSec)*time.Second)
+	defer ticker.Stop()
+	for{
+		select{
+			case <-ticker.C:{
+				redisc.lock.Lock()
+				if nil != redisc.clientPool{
+					for i=0;i<redisc.clientPool.GetCurrentIdleNum();i++{
+						item,err := redisc.clientPool.Get()
+						if nil == err{
+							rcc,ok := item.(*RedisCacheClient)
+							if ok{
+								rcc.IsAlive()
+								redisc.clientPool.Put(item)
+							}
+						}
+					}
+				}
+				redisc.lock.Unlock()
+			}
+			case <-redisc.stopChan:{
+				return
+			}
+		}
+	}
 }
 
 func (redisc *RedisCache)Start()(err error){
@@ -117,7 +149,7 @@ func (redisc *RedisCache)Start()(err error){
 		redisc.clientPool = clientPool
 		if nil == redisc.clientPool.Start(redisc.timeoutSec){
 			redisc.isStopped = false
-			fmt.Println("redisc.isActive")
+			go redisc.tick()
 		}
 		fmt.Println("start------------end---------------",err)
 		return err
@@ -132,6 +164,7 @@ func (redisc *RedisCache)Stop()(err error){
 		err = redisc.clientPool.Stop()
 		if utils.CONNECTPOOL_STOP_SUC == err{
 			redisc.isStopped = true
+			redisc.stopChan <- struct{}{}
 		}
 		return err
 	}

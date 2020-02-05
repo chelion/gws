@@ -13,7 +13,7 @@ import(
     "encoding/gob"
 	"testing"
 )
-
+/*
 func TestMemCache(t *testing.T){
 	type Student struct{
 		Name string
@@ -69,7 +69,7 @@ func TestMemCache(t *testing.T){
 	cc.Exists("test25")
 	fmt.Println("--------end test memcache cache--------")
 }
-
+*/
 func BenchmarkMemCache(b *testing.B){
 	type Student struct{
 		Name string

@@ -4,6 +4,7 @@ package cache
 // in the LICENSE file.
 import(
 	"io"
+	"time"
 	"sync"
 	"net"
 	"bytes"
@@ -35,6 +36,7 @@ type FastCache struct{
 	lock *sync.RWMutex
 	timeoutSec int64
 	isStopped bool
+	stopChan chan struct{} 
 }
 
 type FastCacheClient struct{
@@ -85,8 +87,38 @@ func (fcc *FastCacheClient)IsAlive()(sta bool){
 }
 
 func NewFastCache(config *CacheConfig)(fcc *FastCache,err error){
-	fcc = &FastCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,lock:new(sync.RWMutex),timeoutSec:config.TimeoutSec}
+	fcc = &FastCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,lock:new(sync.RWMutex),
+		timeoutSec:config.TimeoutSec,stopChan:make(chan struct{})}
 	return fcc,nil
+}
+
+func (fastc *FastCache)tick(){
+	var i int64
+	ticker := time.NewTicker(time.Duration(fastc.timeoutSec)*time.Second)
+	defer ticker.Stop()
+	for{
+		select{
+			case <-ticker.C:{
+				fastc.lock.Lock()
+				if nil != fastc.clientPool{
+					for i=0;i<fastc.clientPool.GetCurrentIdleNum();i++{
+						item,err := fastc.clientPool.Get()
+						if nil == err{
+							fcc,ok := item.(*FastCacheClient)
+							if ok{
+								fcc.IsAlive()
+								fastc.clientPool.Put(item)
+							}
+						}
+					}
+				}
+				fastc.lock.Unlock()
+			}
+			case <-fastc.stopChan:{
+				return
+			}
+		}
+	}
 }
 
 func (fastc *FastCache)Start()(err error){
@@ -107,12 +139,12 @@ func (fastc *FastCache)Start()(err error){
 			return utils.ConnectPoolItem(rcc),nil
 		})
 		if nil != err{
-			
 			return err
 		}
 		fastc.clientPool = clientPool
 		if nil == fastc.clientPool.Start(fastc.timeoutSec){
 			fastc.isStopped = false
+			go fastc.tick()
 		}
 		return err
 	}
@@ -126,6 +158,7 @@ func (fastc *FastCache)Stop()(err error){
 		err = fastc.clientPool.Stop()
 		if utils.CONNECTPOOL_STOP_SUC == err{
 			fastc.isStopped = true
+			fastc.stopChan <- struct{}{}
 		}
 		return err
 	}

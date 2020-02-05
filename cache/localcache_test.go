@@ -103,7 +103,7 @@ func BenchmarkLocalCache(b *testing.B){
 	wg.Wait()
 	fmt.Println("--------end test LocalCache cache--------")
 }
-
+/*
 func TestLocalCache(t *testing.T){
 	type Student struct{
 		Name string
@@ -163,3 +163,4 @@ func TestLocalCache(t *testing.T){
 	}
 	fmt.Println("--------end test memcache cache--------")
 }
+*/

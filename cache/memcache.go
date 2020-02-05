@@ -7,6 +7,7 @@ package cache
 import(
 	"net"
 	"sync"
+	"time"
 	"bytes"
 	"errors"
 	"strconv"
@@ -36,6 +37,7 @@ type MemCache struct{
 	lock *sync.RWMutex
 	timeoutSec int64
 	isStopped bool
+	stopChan chan struct{} 
 }
 
 type MemCacheClient struct{
@@ -84,8 +86,38 @@ func (mcc *MemCacheClient)IsAlive()(sta bool){
 
 
 func NewMemCache(config *CacheConfig)(memc *MemCache,err error){
-	memc = &MemCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,netWork:config.Network,lock:new(sync.RWMutex),timeoutSec:config.TimeoutSec}
+	memc = &MemCache{clientPool:nil,config:config,isStopped:true,serverAddr:config.ServerAddr,
+		netWork:config.Network,lock:new(sync.RWMutex),timeoutSec:config.TimeoutSec,stopChan:make(chan struct{})}
 	return memc,nil
+}
+
+func (memc *MemCache)tick(){
+	var i int64
+	ticker := time.NewTicker(time.Duration(memc.timeoutSec)*time.Second)
+	defer ticker.Stop()
+	for{
+		select{
+			case <-ticker.C:{
+				memc.lock.Lock()
+				if nil != memc.clientPool{
+					for i=0;i<memc.clientPool.GetCurrentIdleNum();i++{
+						item,err := memc.clientPool.Get()
+						if nil == err{
+							mcc,ok := item.(*MemCacheClient)
+							if ok{
+								mcc.IsAlive()
+								memc.clientPool.Put(item)
+							}
+						}
+					}
+				}
+				memc.lock.Unlock()
+			}
+			case <-memc.stopChan:{
+				return
+			}
+		}
+	}
 }
 
 func (memc *MemCache)Start()(err error){
@@ -106,12 +138,12 @@ func (memc *MemCache)Start()(err error){
 			return utils.ConnectPoolItem(mcc),nil
 		})
 		if nil != err{
-			
 			return err
 		}
 		memc.clientPool = clientPool
 		if nil == memc.clientPool.Start(memc.timeoutSec){
 			memc.isStopped = false
+			go memc.tick()
 		}
 		return err
 	}
@@ -125,6 +157,7 @@ func (memc *MemCache)Stop()(err error){
 		err = memc.clientPool.Stop()
 		if utils.CONNECTPOOL_STOP_SUC == err{
 			memc.isStopped = true
+			memc.stopChan <- struct{}{}
 		}
 		return err
 	}
