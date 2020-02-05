@@ -4,9 +4,12 @@ import(
 	"fmt"
 	"sync"
 	"bytes"
+	"time"
 	"strconv"
 	"testing"
 	"encoding/gob"
+	"github.com/google/uuid"
+	"github.com/chelion/gws/utils"
 )
 
 func BenchmarkLocalCache(b *testing.B){
@@ -164,3 +167,33 @@ func TestLocalCache(t *testing.T){
 	fmt.Println("--------end test memcache cache--------")
 }
 */
+
+func GenerateUid(userUid string)string{
+	uuidv,_ := uuid.NewUUID()
+	serviceEnd := utils.MD5("publiciot_"+strconv.FormatInt(time.Now().UnixNano(),10)+uuidv.String()+userUid+"_service")[8:24]
+	return "S000-09-"+serviceEnd
+}
+
+func generateToken()([]byte){
+	uuidv,_ := uuid.NewUUID()
+	token := utils.MD5("publiciot_"+uuidv.String()+"_token")
+	return utils.String2Bytes(token[8:24])
+}
+func BenchmarkLocalCacheM(b *testing.B){
+	cc,err := NewLocalCache(&LocalCacheConfig{4096*1024*1024})
+	if nil != err{
+		b.Errorf("new local fail\n")
+	}
+	err = cc.Start()
+	if nil != err{
+		b.Errorf(err.Error())
+	}else{
+		fmt.Println("local cache init succes")
+	}
+	defer cc.Stop()
+	b.N = 2000000
+	for i := 0;i<2000000;i++{
+		userUid := GenerateUid(strconv.FormatInt(int64(i),10))
+		cc.Set(userUid,generateToken(),0)
+	}
+}

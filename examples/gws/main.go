@@ -36,7 +36,7 @@ func main(){
 	})
 	g.LoadHTMLGlob("html/**/*")
 	
-	g.Use(func (ctx *gws.Context){
+	g.UseMiddleWare(func (ctx *gws.Context){
 		requestcnt++
 	})
 	g.NotFound(func (ctx *gws.Context){

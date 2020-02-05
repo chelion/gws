@@ -33,6 +33,9 @@ func main(){
 	g.GET("/",func(ctx *gws.Context){
 		ctx.Data(200,"text/html; charset=utf-8",utils.String2Bytes("Hello, World!"))
 	})
+	g.UseMiddleWare(func (ctx *gws.Context){
+		fmt.Println(string(ctx.Path()))
+	})
 	group1 := g.Group("/v1")
 	{
 		group1.StaticFile("/favicon.ico","./fav.ico")
@@ -42,12 +45,14 @@ func main(){
 			ctx.Data(200,"text/html; charset=utf-8",utils.String2Bytes("Group1,Hello, World!"))
 		})
 	}
+	
 	group2 := g.Group("/v2")
 	{
 		group2.GET("/",func(ctx *gws.Context){
 			ctx.Data(200,"text/html; charset=utf-8",utils.String2Bytes("Group2,Hello, World!"))
 		})
 	}
+	
 	g.Start()
 	defer g.Stop()
 }

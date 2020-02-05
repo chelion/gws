@@ -218,7 +218,7 @@ func (group *RouterGroup)NotAllowed(handle ContextHandler){
 	group.server.router.MethodNotAllowed = handle
 }
 
-func (group *RouterGroup)Use(middleware ...ContextHandler)*RouterGroup {
+func (group *RouterGroup)UseMiddleWare(middleware ...ContextHandler)*RouterGroup {
 	if false == group.isRoot{
 		panic("need use group by New")
 	}

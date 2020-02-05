@@ -3,6 +3,7 @@ package gws
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 import(
+	"fmt"
 	"strings"
 	"github.com/chelion/gws/fasthttp"
 )
@@ -11,6 +12,7 @@ type RouterGroup struct{
 	basePath string
 	isRoot bool
 	server *GWS
+	isSetRootPath bool
 }
 
 func (group *RouterGroup)Group(basePath string)(* RouterGroup){
@@ -91,6 +93,7 @@ func (group *RouterGroup)StaticFS(path string,rootpath string){
 	}
 	prefix := path[:plen-10]
 	fileHandler := fasthttp.FSHandler(rootpath, strings.Count(prefix, "/"))
+	fmt.Println(path)
 	group.server.router.GET(path, func(ctx *Context) {
 		fileHandler(ctx.Rctx)
 	})
