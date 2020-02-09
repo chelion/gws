@@ -645,6 +645,10 @@ func (ctx *RequestCtx) SetStatusCode(statusCode int) {
 	ctx.Response.SetStatusCode(statusCode)
 }
 
+func (ctx *RequestCtx)SetContentLength(len int){
+	ctx.Response.Header.SetContentLength(int(len))
+}
+
 // SetContentType sets response Content-Type.
 func (ctx *RequestCtx) SetContentType(contentType string) {
 	ctx.Response.Header.SetContentType(contentType)

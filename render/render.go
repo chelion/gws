@@ -1,7 +1,7 @@
 package render
 
 import(
-	"github.com/chelion/gws/fasthttp"
+	"io"
 )
 
 var(
@@ -22,12 +22,12 @@ var(
 	OctetStreamContentType = "Content-Type: application/octet-stream"
 )
 
-type Render interface {
-	Render(ctx *fasthttp.RequestCtx) error
-	WriteContentType(ctx *fasthttp.RequestCtx)
+type RenderIO interface{
+	io.Writer
+	SetContentType(contentType string)
+	SetContentLength(len int)
 }
 
-
-func writeContentType(ctx *fasthttp.RequestCtx, value string) {
-	ctx.Response.Header.SetContentType(value)
+type Render interface {
+	Render(renderIO RenderIO) error
 }

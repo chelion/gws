@@ -42,8 +42,9 @@ func (socketLogConn *SocketLogConn)Write(b []byte) (n int, err error){
 		socketLogConn.lock.RUnlock()
 		n,err = socketLogConn.conn.Write(b)
 		if nil != err{
-			socketLogConn.Close()
-			go socketLogConn.reconnect()
+			if CONISNIL_ERR != socketLogConn.Close(){
+				go socketLogConn.reconnect()
+			}
 		}
 		return n,err
 	}
@@ -142,8 +143,9 @@ func (socketLog *SocketLog)socketTick(){
 				if nil != socketLog.conn{
 					_,err := socketLog.conn.Write([]byte("\r\nTick\r\n"))
 					if nil != err && err != CONISNIL_ERR{
-						socketLog.conn.Close()
-						go socketLog.conn.reconnect()
+						if CONISNIL_ERR != socketLog.conn.Close(){
+							go socketLog.conn.reconnect()
+						}
 					}
 				}
 			}

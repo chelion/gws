@@ -14,7 +14,6 @@ type ConsoleLog struct{
 
 func NewConsoleLog(date bool)(consolelog *ConsoleLog,err error){
 	log := slog.New(os.Stderr, "",0)
-	log.SetFlags(slog.Lshortfile)
 	consolelog = &ConsoleLog{}
 	consolelog.LogHandler = LogHandler{log:log,level:DEBUG,date:date}
 	return consolelog,nil

@@ -1,11 +1,10 @@
 package render
 
-// Copyright 2014 Manu Martinez-Almeida.  All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
+// Copyright 2018 chelion. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be found
+// in the LICENSE file.
 
 import (
-	"github.com/chelion/gws/fasthttp"
 	"html/template"
 )
 
@@ -76,15 +75,10 @@ func (r HTMLDebug) loadTemplate() *template.Template {
 }
 
 // Render (HTML) executes template and writes its result with custom ContentType for response.
-func (r HTML) Render(ctx *fasthttp.RequestCtx) error {
-	r.WriteContentType(ctx)
+func (r HTML) Render(renderIO RenderIO) error {
+	renderIO.SetContentType(HTMLContentType)
 	if r.Name == "" {
-		return r.Template.Execute(ctx, r.Data)
+		return r.Template.Execute(renderIO, r.Data)
 	}
-	return r.Template.ExecuteTemplate(ctx, r.Name, r.Data)
-}
-
-// WriteContentType (HTML) writes HTML ContentType.
-func (r HTML) WriteContentType(ctx *fasthttp.RequestCtx) {
-	writeContentType(ctx,HTMLContentType)
+	return r.Template.ExecuteTemplate(renderIO, r.Name, r.Data)
 }

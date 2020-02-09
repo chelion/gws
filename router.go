@@ -234,6 +234,9 @@ func (r *Router) Handler(rCtx *fasthttp.RequestCtx) {
 	}
 	path := string(rCtx.URI().PathOriginal())
 	method := string(rCtx.Method())
+	if true == r.Server.isDebug{
+		r.Server.Logger.Println(method,string(rCtx.URI().Path()))
+	}
 	if root := r.trees[method]; root != nil {
 		if f, tsr := root.getValue(path, rCtx); f != nil {
 			context := r.acquireContext(rCtx)

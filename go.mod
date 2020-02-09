@@ -12,5 +12,6 @@ require (
 	github.com/klauspost/compress v1.8.2
 	github.com/klauspost/cpuid v1.2.3 // indirect
 	github.com/ugorji/go/codec v1.1.7
+	github.com/vmihailenco/msgpack v4.0.4+incompatible
 	gopkg.in/yaml.v2 v2.2.8
 )

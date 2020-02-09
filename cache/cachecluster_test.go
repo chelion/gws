@@ -2,7 +2,7 @@ package cache
 // Copyright 2018 chelion. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
-/*
+
 import(
 	"fmt"
 	"sync"
@@ -16,11 +16,7 @@ func BenchmarkCacheCluster(b *testing.B){
 		fmt.Println(err)
 		return
 	}
-	cacheCluster,err := NewCacheCluster()
-	if nil != err{
-		fmt.Println(err)
-		return
-	}
+	cacheCluster := NewCacheCluster()
 	err = cacheCluster.AddCacheServer(cc,addr,16)
 	if nil != err{
 		fmt.Println(err)
@@ -49,4 +45,3 @@ func BenchmarkCacheCluster(b *testing.B){
 	b.N = 30 * 50000
 	wg.Wait()
 }
-*/

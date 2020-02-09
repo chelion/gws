@@ -247,7 +247,7 @@ func (group *RouterGroup)Stop()(err error){
 	return PARAM_NIL
 }
 
-func (group *RouterGroup)SetDebug(debug bool){
+func (group *RouterGroup)EnableDebug(debug bool){
 	if false == group.isRoot{
 		panic("need use group by New")
 	}

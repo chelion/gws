@@ -61,9 +61,8 @@ func (cacheCluster *CacheCluster)sort(){
 	sort.Sort(cacheCluster)
 }
 
-func NewCacheCluster()(*CacheCluster,error){
-	cacheCluster := &CacheCluster{rwLock:new(sync.RWMutex),caches:make(map[string]Cache),cacheVirtualNodeMap:make(map[uint32]*CacheVirtualNode,0)}
-	return cacheCluster,nil
+func NewCacheCluster()(*CacheCluster){
+	return &CacheCluster{rwLock:new(sync.RWMutex),caches:make(map[string]Cache),cacheVirtualNodeMap:make(map[uint32]*CacheVirtualNode,0)}
 }
 
 func DestroyCacheCluster(cacheCluster *CacheCluster)error{
@@ -90,6 +89,8 @@ func (cacheCluster *CacheCluster)AddCacheServer(cache Cache,addr string,virtualN
 			csnKey := utils.CRC32(utils.String2Bytes(virtualNodeName))
 			cacheCluster.cacheVirtualNodeMap[csnKey] = &CacheVirtualNode{name:virtualNodeName,csc:csc}
 		}
+	}else{
+		return err
 	}
 	cacheCluster.caches[addr] = cache
 	cacheCluster.sort()

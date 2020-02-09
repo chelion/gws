@@ -1,1 +1,1 @@
-这是一个文件发送测试
+this is a gws test!

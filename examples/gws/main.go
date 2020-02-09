@@ -32,18 +32,17 @@ func main(){
 	}
 	g.UseDefaultSession()
 	g.GET("/",func(ctx *gws.Context){
-		ctx.Rctx.Write([]byte("hello,world"))
+		ctx.Rctx.Write([]byte("gws is ok!"))
 	})
 	g.LoadHTMLGlob("html/**/*")
-	
 	g.UseMiddleWare(func (ctx *gws.Context){
 		requestcnt++
 	})
 	g.NotFound(func (ctx *gws.Context){
-		ctx.String(404,"404 not find")
+		ctx.String(404,"404 not find,is my 404")
 	})
 	g.NotAllowed(func(ctx *gws.Context){
-		ctx.String(403,"403 not allow")
+		ctx.String(403,"403 not allow,is my 403")
 	})
 	g.GET("/statistics",func(ctx *gws.Context){
 		ctx.String(200,"request count %d",requestcnt)
@@ -82,8 +81,11 @@ func main(){
 			ctx.String(200,"hello")
 		}
 	})
-	g.GET("/html",func (ctx *gws.Context){
+	g.GET("/zh",func (ctx *gws.Context){
 		ctx.HTML(200, "zh/index.tmpl",nil)
+	})
+	g.GET("/en",func (ctx *gws.Context){
+		ctx.HTML(200, "en/index.tmpl",nil)
 	})
 	g.GET("/json",func (ctx *gws.Context){
 		if nil != ctx.Get("name"){

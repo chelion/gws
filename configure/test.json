@@ -1,2 +1,3 @@
-{"debug":{"addr":"192.168.0.1","port":80,"uselink":false,"fix":34.5},
+{"comment":"不支持多层同名嵌套",
+"debug":{"addr":"192.168.0.1","port":80,"uselink":false,"fix":34.5},
 "release":{"addr":"112.74.56.58","port":80,"uselink":true,"fix":23.2}}
