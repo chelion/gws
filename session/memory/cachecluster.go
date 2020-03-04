@@ -13,12 +13,9 @@ type MCacheCluster struct{
 
 // New slice number ccMap
 func NewCCMap(cacheConfig []*MCacheConfig) *MCacheCluster {
-	cacheCluster,err := cache.NewCacheCluster()
-	if nil != err{
-		panic(err)
-	}
+	cacheCluster := cache.NewCacheCluster()
 	for i:=0;i<len(cacheConfig);i++{
-		err = cacheCluster.AddCacheServer(cacheConfig[i].Cache,cacheConfig[i].Addr,cacheConfig[i].VirtualNodeNum)
+		err := cacheCluster.AddCacheServer(cacheConfig[i].Cache,cacheConfig[i].Addr,cacheConfig[i].VirtualNodeNum)
 		if nil != err{
 			panic(err)
 		}
