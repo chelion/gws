@@ -1,9 +1,11 @@
 package session
+
 // Copyright 2018 chelion. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 import (
 	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -22,7 +24,7 @@ func NewDefaultConfig() *Config {
 		Domain:                  "",
 		Expires:                 defaultExpires,
 		GCLifetime:              defaultGCLifetime,
-		SessionLifetime:         60*20,//20 minutes
+		SessionLifetime:         60 * 60 * 12, //12 hour
 		Secure:                  true,
 		SessionIdInURLQuery:     false,
 		SessionNameInUrlQuery:   "",
